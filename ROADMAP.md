@@ -276,7 +276,24 @@ The operations passed to the block are wrapped with the same instrumentation.
 Still open: borrow-wait, discard and eviction counters, which need the pool to report events rather
 than just state; and the reactive facade, which the decorator does not yet cover.
 
-**OpenTelemetry is still to do.**
+**OpenTelemetry is done** — `sftp-client-opentelemetry`, a CLIENT span per operation with a
+`withSession` block becoming one `sftp.session` span and the operations nested beneath it.
+
+The open question in this entry was whether attribute names would be a guess. It was checked rather
+than assumed: searching the semantic-conventions repository for `sftp` returns nothing at all — no
+model group, no document, not even a discussion issue — so there is definitively no convention for
+SFTP, FTP, SCP, or file transfer as a class. The connection attributes used are stable and standard
+(`server.address`, `server.port`, `network.protocol.name`, `network.protocol.version`,
+`error.type`); the file attributes reuse the `file.*` registry, which is entirely experimental and
+which no span convention consumes. Both facts are recorded per-attribute in `SftpAttributes` rather
+than in a footnote, and the module takes no compile dependency on the incubating semconv artifact,
+whose own README tells library authors not to.
+
+Note the deliberate asymmetry with the metrics module: tracing aggregates composites into a session
+span because that is what makes a unit of work legible, where metrics deliberately do not, because a
+counter should reflect what crossed the wire. Same data, two different useful questions.
+
+Still open for both modules: the reactive facade.
 
 **Decorators, not instrumentation in the core.** Extracting `SftpOperations` made this cheap: a
 metering or tracing decorator implements that interface, wraps another, and the core never learns

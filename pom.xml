@@ -47,6 +47,7 @@
          internals, and the two are released as a set, so a split like that is a latent bug. -->
     <sshd.version>2.17.1</sshd.version>
     <micrometer.version>1.17.0</micrometer.version>
+    <opentelemetry.version>1.64.0</opentelemetry.version>
     <quarkus.version>3.33.2</quarkus.version>        <!-- 3.33.4 never existed; .2 is the last on this line. 3.37.3 is latest. CONFIRM the LTS line on quarkus.io before release -->
     <quarkus-sshd.version>1.2.0</quarkus-sshd.version>
     <quarkus-jsch.version>3.2.0</quarkus-jsch.version>   <!-- VERIFY: not build-tested -->
@@ -72,6 +73,7 @@
     <!-- Last: it consumes core and both providers, as an application would. -->
     <module>sftp-client-kotlin</module>
     <module>sftp-client-micrometer</module>
+    <module>sftp-client-opentelemetry</module>
     <module>sftp-client-integration-tests</module>
     <module>integrations/quarkus</module>
     <module>integrations/spring/autoconfigure</module>

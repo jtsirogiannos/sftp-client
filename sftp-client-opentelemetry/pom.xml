@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.github.jtsirogiannos</groupId>
+        <artifactId>sftp-client-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>sftp-client-opentelemetry</artifactId>
+    <name>SFTP Client :: OpenTelemetry</name>
+    <description>
+        OpenTelemetry tracing as a decorator. Uses stable semantic conventions where they exist;
+        there is none for file transfer, and the module says so rather than implying conformance.
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>sftp-client-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!--
+          opentelemetry-api only. The stable semconv artifact would supply typed constants for
+          server.* and network.*, but it is one more version to align for a handful of strings, and
+          the incubating artifact - which is where file.* lives - carries an explicit "library
+          instrumentation SHOULD NOT depend on this" warning. Attribute names are declared inline in
+          SftpAttributes instead, each labelled with its actual stability.
+        -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-api</artifactId>
+            <version>${opentelemetry.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk-testing</artifactId>
+            <version>${opentelemetry.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>sftp-provider-inmemory</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
