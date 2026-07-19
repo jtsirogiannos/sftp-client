@@ -63,7 +63,13 @@ public interface SftpSession extends SftpSessionLifecycle {
     }
 
     /**
-     * Attributes of a single path. Throws if it does not exist — use {@link #exists} to test.
+     * Attributes of a single path, <strong>following symlinks</strong>: a link is reported as
+     * whatever it points at, and {@link RemoteFile#symlink()} is therefore always false here. Use
+     * {@link #lstat} to see the link itself.
+     *
+     * @throws io.github.jtsirogiannos.sftp.client.api.SftpException with status
+     *         {@code SSH_FX_NO_SUCH_FILE} if the path does not exist — use {@link #exists} to test
+     *         rather than catching this
      */
     RemoteFile stat(String path);
 
@@ -146,7 +152,12 @@ public interface SftpSession extends SftpSessionLifecycle {
     FilesystemStats statvfs(String path);
 
     /**
-     * Creates a directory. Fails if the parent is missing — this does not create intermediates.
+     * Creates a single directory. Does not create intermediate parents; the core's {@code mkdirs}
+     * is built from this.
+     *
+     * @throws io.github.jtsirogiannos.sftp.client.api.SftpException with
+     *         {@code SSH_FX_NO_SUCH_FILE} if the parent is missing, or
+     *         {@code SSH_FX_FILE_ALREADY_EXISTS} if the path is taken
      */
     void mkdir(String path);
 
@@ -158,7 +169,17 @@ public interface SftpSession extends SftpSessionLifecycle {
     void rename(String from, String to);
 
     /**
-     * Removes a file, or an empty directory. Not recursive.
+     * Removes a file <em>or</em> an empty directory. Not recursive.
+     *
+     * <p><strong>Implementer note, and the one most easily got wrong:</strong> the protocol uses two
+     * different packets — {@code SSH_FXP_REMOVE} for files and {@code SSH_FXP_RMDIR} for directories
+     * — and most client libraries expose them as two methods. A provider that only ever sends the
+     * file form works perfectly until someone deletes a directory. Decide which to send by checking
+     * the path first, with {@link #lstat} rather than {@link #stat}, so a symlink to a directory is
+     * removed as the link it is instead of being followed.
+     *
+     * @throws io.github.jtsirogiannos.sftp.client.api.SftpException if the path is missing, or is a
+     *         directory that still has entries
      */
     void remove(String path);
 
@@ -183,6 +204,13 @@ public interface SftpSession extends SftpSessionLifecycle {
     /**
      * Opens a remote file for writing. The caller closes the stream, and close must flush — an
      * upload is not durable until then.
+     *
+     * <p>{@link WriteMode#CREATE_NEW} must either be honoured atomically by the backend or refused:
+     * report {@link SftpCapabilities#atomicCreateNew()} false and throw
+     * {@link UnsupportedOperationException}. Emulating it with a stat-then-create sequence loses the
+     * exclusivity the caller asked for, and is worse than not offering it.
+     *
+     * @throws UnsupportedOperationException if {@code mode} is one this backend cannot honour
      */
     OutputStream openWrite(String path, WriteMode mode);
 

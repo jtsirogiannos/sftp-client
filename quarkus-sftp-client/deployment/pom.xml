@@ -72,6 +72,21 @@
 
     <build>
         <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <configuration>
+          <!--
+            This module's only class is the build-step processor, which is package-private on
+            purpose: nothing here is callable API. Javadoc treats "no public or protected classes
+            found to document" as an error, so without this the release build fails on a module
+            that correctly has nothing to say. failOnError=false still produces the (empty) javadoc
+            jar that Maven Central requires.
+          -->
+          <failOnError>false</failOnError>
+        </configuration>
+      </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>

@@ -38,19 +38,47 @@ import java.util.concurrent.Flow;
  *
  * <p>Returned stages may complete on an I/O thread. Do not block in a dependent action, and do not
  * assume any particular completing thread.
+ *
+ * <p>Failures arrive as a <em>failed stage</em> rather than a thrown exception, carrying the same
+ * {@link io.github.jtsirogiannos.sftp.client.api.SftpException} the blocking contract would produce,
+ * with the server's {@code SSH_FX_*} status where there was one. A method here should not throw
+ * synchronously; a caller composing stages has no way to catch that.
  */
 public interface AsyncSftpSession extends SftpSessionLifecycle {
 
+    /**
+     * Directory entries, excluding {@code "."} and {@code ".."}. Each entry carries an absolute path
+     * that can be passed straight back into another operation.
+     */
     CompletionStage<List<RemoteFile>> listAsync(String path);
 
+    /**
+     * Attributes of a path, following symlinks. Fails with {@code SSH_FX_NO_SUCH_FILE} when the path
+     * is absent, which is an ordinary answer and must not invalidate the session.
+     */
     CompletionStage<RemoteFile> statAsync(String path);
 
+    /**
+     * Whether the path exists. Completes {@code false} rather than failing when it does not: a
+     * missing file is the question, not an error.
+     */
     CompletionStage<Boolean> existsAsync(String path);
 
+    /**
+     * Creates a single directory, without creating intermediate parents.
+     */
     CompletionStage<Void> mkdirAsync(String path);
 
+    /**
+     * Moves {@code from} to {@code to}. Whether an occupied target is replaced or refused is decided
+     * by {@link SftpCapabilities#posixRename()}, and the answer must match what the flag claims.
+     */
     CompletionStage<Void> renameAsync(String from, String to);
 
+    /**
+     * Removes a file or an empty directory — see {@link SftpSession#remove} for the two-packet
+     * subtlety that applies equally here.
+     */
     CompletionStage<Void> removeAsync(String path);
 
     /**

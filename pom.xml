@@ -126,6 +126,23 @@
           <artifactId>maven-compiler-plugin</artifactId>
           <version>3.15.0</version>
         </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-javadoc-plugin</artifactId>
+          <version>3.11.2</version>
+          <configuration>
+            <!--
+              Keep the doclint groups that catch genuine mistakes - a broken {@link}, malformed
+              HTML, bad tag syntax - and fail the build on them, because a javadoc jar is required
+              to publish and a broken reference is a defect. The "missing" group is suppressed: on
+              an SPI whose prose already explains each operation, a mandatory "@param path the
+              path" on forty methods is noise rather than meaning. Records are the exception and do
+              document their components, since those are the API surface.
+            -->
+            <doclint>all,-missing</doclint>
+            <failOnWarnings>true</failOnWarnings>
+          </configuration>
+        </plugin>
       </plugins>
     </pluginManagement>
     <plugins>

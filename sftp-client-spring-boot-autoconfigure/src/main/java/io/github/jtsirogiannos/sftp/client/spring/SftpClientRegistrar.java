@@ -33,7 +33,7 @@ import java.util.concurrent.Executor;
  * The number of beans depends on configuration, so the definitions have to be contributed before the
  * container decides what exists. The cost is that this runs before {@code @ConfigurationProperties}
  * binding, so it binds {@link SftpClientProperties} straight off the {@link Environment} with
- * {@link Binder} rather than injecting the bound object. The properties bean is still registered for
+ * {@code Binder} rather than injecting the bound object. The properties bean is still registered for
  * everyone else — see {@link SftpClientAutoConfiguration}.
  *
  * <p><strong>Configuration is validated here, at startup.</strong> Both the provider lookup and the

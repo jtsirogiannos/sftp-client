@@ -26,6 +26,20 @@ import java.util.Objects;
  * {@code equals} via {@code Objects.equals}, which on an array is reference comparison — two configs
  * with identical passwords are therefore unequal. That is deliberate: value-comparing secrets invites
  * timing attacks, and nothing in this library needs config equality.
+ *
+ * @param host            hostname or address of the SFTP server
+ * @param port            TCP port; {@value #DEFAULT_PORT} unless the server says otherwise
+ * @param username        the account to authenticate as
+ * @param password        password credential, or {@code null} when authenticating by key. Copied on
+ *                        the way in and out, so the caller's array stays theirs to wipe
+ * @param privateKey      path to a private key file, or {@code null} when authenticating by password
+ * @param passphrase      passphrase protecting {@code privateKey}, or {@code null} if it has none
+ * @param hostKeyStrategy how the server's host key is trusted. There is no safe default, so this is
+ *                        required — see {@link HostKeyStrategy}
+ * @param knownHosts      known-hosts file backing {@link HostKeyStrategy#STRICT} and
+ *                        {@link HostKeyStrategy#ACCEPT_NEW}, or {@code null} for the user default
+ * @param connectTimeout  how long to wait for the TCP connect, key exchange and authentication
+ * @param requestTimeout  how long to wait for a single SFTP request once connected
  */
 public record SftpConnectionConfig(
     String host,

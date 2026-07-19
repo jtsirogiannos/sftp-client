@@ -156,7 +156,7 @@ public interface SftpOperations {
      * the destination — rename is only atomic within a filesystem, so a temp file in {@code /tmp}
      * would defeat the purpose. It is removed on a best-effort basis if the upload fails.
      *
-     * <h2>When the server cannot do this</h2>
+     * <h4>When the server cannot do this</h4>
      *
      * <p>Replacing an <em>existing</em> file this way needs a rename that overwrites, which is
      * {@code posix-rename} and therefore SFTP v5 or later — see

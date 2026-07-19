@@ -37,7 +37,7 @@ public interface SftpRuntimeConfig {
 
         /**
          * Provider to resolve via ServiceLoader: `mina` or `jsch`. The matching
-         * `quarkus-sftp-client-<name>` bundle must be a dependency.
+         * `quarkus-sftp-client-&lt;name&gt;` bundle must be a dependency.
          * <p>
          * Read during augmentation as well as at runtime, because it decides which driver has to be
          * on the classpath — so changing it means rebuilding, exactly like swapping a JDBC driver.
