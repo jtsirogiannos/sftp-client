@@ -91,6 +91,13 @@ public final class BoundedSftpSessionPool<S extends SftpSessionLifecycle>
     private int live;
     private boolean closed;
 
+    /**
+     * Listeners, notified outside the lock. Copy-on-write because reads outnumber writes by the
+     * operation count: registration happens at wiring time, iteration on every borrow.
+     */
+    private final java.util.concurrent.CopyOnWriteArrayList<SftpSessionPoolListener> listeners =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
     /** A pool of blocking sessions — what every provider can supply. */
     public static BoundedSftpSessionPool<SftpSession> blocking(SftpProvider provider,
             SftpConnectionConfig config) {
@@ -133,9 +140,34 @@ public final class BoundedSftpSessionPool<S extends SftpSessionLifecycle>
         this.acquireTimeoutNanos = acquireTimeout.toNanos();
     }
 
+    /**
+     * Registers a listener for this pool's events. See {@link SftpSessionPoolListener} for the
+     * contract: callbacks run on pool-using threads and must be quick and non-throwing.
+     */
+    public void addListener(SftpSessionPoolListener listener) {
+        listeners.add(Objects.requireNonNull(listener, "listener"));
+    }
+
+    /**
+     * A listener failure must never become an operation failure — observation does not get to break
+     * the thing observed. The throw is logged rather than swallowed silently, because a listener
+     * that throws on every event is a bug someone needs to see.
+     */
+    private void notifyListeners(java.util.function.Consumer<SftpSessionPoolListener> event) {
+        for (SftpSessionPoolListener listener : listeners) {
+            try {
+                event.accept(listener);
+            } catch (RuntimeException e) {
+                log.warn("A pool listener threw; ignoring so the operation is unaffected", e);
+            }
+        }
+    }
+
     @Override
     public S borrow() {
         long deadline = System.nanoTime() + acquireTimeoutNanos;
+        // Set on first finding the pool at capacity; the borrow reports its total wait on exit.
+        long waitStartedNanos = 0;
         for (; ; ) {
             S pooled = null;
             boolean reservedSlot = false;
@@ -154,6 +186,9 @@ public final class BoundedSftpSessionPool<S extends SftpSessionLifecycle>
                     live++; // reserve before releasing the lock so nobody else takes the slot
                     reservedSlot = true;
                 } else {
+                    if (waitStartedNanos == 0) {
+                        waitStartedNanos = System.nanoTime();
+                    }
                     long remaining = deadline - System.nanoTime();
                     if (remaining <= 0) {
                         log.warn("Session pool for {}@{}:{} exhausted: all {} sessions in use after "
@@ -161,6 +196,8 @@ public final class BoundedSftpSessionPool<S extends SftpSessionLifecycle>
                                         + "that borrowed a session and never returned it.",
                                 config.username(), config.host(), config.port(), maxSize,
                                 Duration.ofNanos(acquireTimeoutNanos).toMillis());
+                        reportWait(waitStartedNanos);
+                        notifyListeners(SftpSessionPoolListener::borrowTimedOut);
                         throw new SftpException("timed out after "
                                 + Duration.ofNanos(acquireTimeoutNanos).toMillis()
                                 + "ms waiting for a session; all " + maxSize
@@ -171,6 +208,7 @@ public final class BoundedSftpSessionPool<S extends SftpSessionLifecycle>
                         slotFreed.awaitNanos(remaining);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
+                        reportWait(waitStartedNanos);
                         throw new SftpException("interrupted while waiting for a session", e);
                     }
                     continue;
@@ -183,16 +221,19 @@ public final class BoundedSftpSessionPool<S extends SftpSessionLifecycle>
             if (!expired.isEmpty()) {
                 log.debug("Evicting {} session(s) idle beyond {}ms", expired.size(),
                         Duration.ofNanos(maxIdleNanos).toMillis());
+                expired.forEach(session -> notifyListeners(SftpSessionPoolListener::sessionEvicted));
             }
             expired.forEach(BoundedSftpSessionPool::closeQuietly);
 
             if (pooled != null) {
                 if (pooled.isValid()) {
+                    reportWait(waitStartedNanos);
                     return pooled;
                 }
                 // Died while parked. Drop it and go round again rather than handing over a corpse.
                 log.debug("Discarding a pooled session that failed validation for {}@{}:{}; opening a "
                         + "replacement", config.username(), config.host(), config.port());
+                notifyListeners(SftpSessionPoolListener::sessionValidationFailed);
                 closeQuietly(pooled);
                 releaseSlot();
                 continue;
@@ -202,6 +243,7 @@ public final class BoundedSftpSessionPool<S extends SftpSessionLifecycle>
                 log.debug("Opening a new session to {}@{}:{} via provider '{}' ({} live, max {})",
                         config.username(), config.host(), config.port(), providerName, live,
                         maxSize);
+                reportWait(waitStartedNanos);
                 return opener.get();
             } catch (RuntimeException e) {
                 if (reservedSlot) {
@@ -250,6 +292,7 @@ public final class BoundedSftpSessionPool<S extends SftpSessionLifecycle>
             List<S> toClose = expired;
             log.debug("Evicting {} session(s) idle beyond {}ms", toClose.size(),
                     Duration.ofNanos(maxIdleNanos).toMillis());
+            toClose.forEach(session -> notifyListeners(SftpSessionPoolListener::sessionEvicted));
             executor.execute(() -> toClose.forEach(BoundedSftpSessionPool::closeQuietly));
         }
 
@@ -262,6 +305,7 @@ public final class BoundedSftpSessionPool<S extends SftpSessionLifecycle>
             S dead = ready;
             log.debug("Discarding a pooled session that failed validation for {}@{}:{}; opening a "
                     + "replacement", config.username(), config.host(), config.port());
+            notifyListeners(SftpSessionPoolListener::sessionValidationFailed);
             return CompletableFuture.supplyAsync(() -> {
                 closeQuietly(dead);
                 releaseSlot();
@@ -299,6 +343,9 @@ public final class BoundedSftpSessionPool<S extends SftpSessionLifecycle>
     public void discard(S session) {
         if (session != null) {
             closeQuietly(session);
+            // Only when there really was a session: recycle() funnels its park-refusals here with
+            // one, and counting a null discard would inflate churn with bookkeeping noise.
+            notifyListeners(SftpSessionPoolListener::sessionDiscarded);
         }
         releaseSlot();
     }
@@ -336,6 +383,14 @@ public final class BoundedSftpSessionPool<S extends SftpSessionLifecycle>
             return idle.size();
         } finally {
             lock.unlock();
+        }
+    }
+
+    /** Reports a completed wait, once, if this borrow ever waited at all. */
+    private void reportWait(long waitStartedNanos) {
+        if (waitStartedNanos != 0) {
+            Duration waited = Duration.ofNanos(System.nanoTime() - waitStartedNanos);
+            notifyListeners(listener -> listener.borrowWaited(waited));
         }
     }
 

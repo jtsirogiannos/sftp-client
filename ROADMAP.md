@@ -305,8 +305,13 @@ completion callbacks; a download is measured across its subscription, since a pu
 subscribes to has transferred nothing. Both properties have tests that fail against the naive
 implementation.
 
-Still open: borrow-wait, discard and eviction counters, which need the pool to report events rather
-than just state.
+**Pool events are reported too.** `SftpSessionPoolListener` — borrow waits with their duration,
+timeouts, discards, evictions, and validation failures — registered with
+`BoundedSftpSessionPool.addListener` and consumed by `SftpPoolMetrics.bind`, so one bind call wires
+gauges, counters and the borrow-wait timer together. Listeners run outside the pool's lock and a
+throwing listener is logged and ignored: observation does not get to break the thing observed. The
+event worth the most is the wait timer — waits climb before timeouts do, and the gauges alone
+sample right past both.
 
 **Decorators, not instrumentation in the core.** Extracting `SftpOperations` made this cheap: a
 metering or tracing decorator implements that interface, wraps another, and the core never learns

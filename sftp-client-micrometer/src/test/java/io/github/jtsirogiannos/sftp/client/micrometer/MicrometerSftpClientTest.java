@@ -117,6 +117,32 @@ class MicrometerSftpClientTest {
         }
     }
 
+    /** One bind call wires the event meters too, driven here by real pool behaviour. */
+    @Test
+    void bindWiresTheEventCountersAndTheWaitTimer() {
+        SftpConnectionConfig config = config();
+        try (BoundedSftpSessionPool<SftpSession> pool = BoundedSftpSessionPool.blocking(
+                SftpClients.provider("inmemory"), config, 2,
+                java.time.Duration.ofMillis(40), java.time.Duration.ofSeconds(1))) {
+            SftpPoolMetrics.bind(pool, registry, Tags.of("host", config.host()));
+
+            pool.discard(pool.borrow());                   // churn
+            pool.recycle(pool.borrow());                   // park one...
+            try {
+                Thread.sleep(90);                          // ...past the idle limit
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            pool.recycle(pool.borrow());                   // traffic triggers the sweep
+
+            assertThat(registry.get(SftpPoolMetrics.DISCARDED).counter().count()).isEqualTo(1);
+            assertThat(registry.get(SftpPoolMetrics.EVICTED).counter().count()).isEqualTo(1);
+            assertThat(registry.get(SftpPoolMetrics.BORROW_WAIT).timer().count())
+                .describedAs("nothing ever waited, and an uncontended pool must say so")
+                .isZero();
+        }
+    }
+
     @Test
     void tagsCarryTheEndpointSoSeveralAreDistinguishable() {
         client.exists("/upload");
