@@ -1,0 +1,44 @@
+# Publishing, on a tag. Its own workflow because it needs credentials nothing else may touch: a
+# Central Portal token and a GPG signing key. Keeping that out of the per-PR workflow means a pull
+# request from a fork can never reach them.
+#
+# One repository, one version, one coordinate space, so there is no ordering problem to solve: this
+# publishes every module in a single pass under io.github.jtsirogiannos.
+name: release
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+          # Matches <publishingServerId>central</publishingServerId> in the release profile; the
+          # action writes the settings.xml server entry from the two env vars below.
+          server-id: central
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      # Publishing an artifact whose tests were never run is how a broken release happens. The tag
+      # build repeats the full verify rather than trusting that main was green when the tag was cut.
+      - run: ./mvnw -B verify
+
+      - run: ./mvnw -B -Prelease deploy -DskipTests
+        env:
+          MAVEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
+          MAVEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}

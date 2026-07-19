@@ -1,0 +1,78 @@
+# Upstream compatibility, on a schedule.
+#
+# This is the one place where splitting per framework genuinely pays, and the reason is the trigger
+# rather than the modules. The Quarkus extension and the Spring starters are permanent parts of this
+# project, which means their integration with upstream is ours to keep working. A red build here says
+# "Quarkus or Spring Boot released something that breaks us" — a different fact from "this pull
+# request is broken", arriving on a different clock, so it belongs in a different file.
+#
+# The version under test is resolved from Maven Central at run time rather than hardcoded, so the
+# matrix cannot rot into testing a version nobody ships any more. Pre-releases are filtered out:
+# quarkus-bom's <release> in maven-metadata.xml is currently a .CR build, and chasing candidates
+# would produce noise rather than signal.
+name: compat
+
+on:
+  schedule:
+    # Mondays, 06:00 UTC. Early enough in the week that a break has somewhere to go.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quarkus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+      - id: upstream
+        name: Resolve the newest stable Quarkus
+        run: |
+          set -euo pipefail
+          version=$(curl -sSf --max-time 30 \
+            https://repo1.maven.org/maven2/io/quarkus/quarkus-bom/maven-metadata.xml \
+            | grep -oE '<version>[^<]+' | sed 's/<version>//' \
+            | grep -viE 'alpha|beta|\.cr[0-9]|-rc|-m[0-9]|snapshot' \
+            | tail -1)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Testing against Quarkus **$version** (pinned build uses the value in pom.xml)." \
+            >> "$GITHUB_STEP_SUMMARY"
+      # The whole reactor, not -pl with -am. Quarkus pulls the deployment module in through the
+      # extension descriptor rather than as a Maven dependency, so -am does not include it: the build
+      # then resolves a previously installed deployment jar built against the *pinned* Quarkus and
+      # fails with a misleading "missing dependencies" error from the extension-descriptor goal.
+      # Building everything under the override costs about a minute and is immune to that.
+      - run: ./mvnw -B verify -Dquarkus.version=${{ steps.upstream.outputs.version }}
+
+  spring:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+      - id: upstream
+        name: Resolve the newest stable Spring Boot
+        run: |
+          set -euo pipefail
+          version=$(curl -sSf --max-time 30 \
+            https://repo1.maven.org/maven2/org/springframework/boot/spring-boot-dependencies/maven-metadata.xml \
+            | grep -oE '<version>[^<]+' | sed 's/<version>//' \
+            | grep -viE 'alpha|beta|\.cr[0-9]|-rc|-m[0-9]|snapshot' \
+            | tail -1)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Testing against Spring Boot **$version** (pinned build uses the value in pom.xml)." \
+            >> "$GITHUB_STEP_SUMMARY"
+      # Whole reactor here too, for symmetry with the Quarkus job and the same immunity to
+      # module-selection subtleties.
+      - run: ./mvnw -B verify -Dspring-boot.version=${{ steps.upstream.outputs.version }}

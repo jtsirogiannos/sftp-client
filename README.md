@@ -283,6 +283,12 @@ binary.
 
 ## Known gaps
 
+- **Quarkus 3.37.3 does not currently work.** The pinned 3.33.2 is green, but building against the
+  newest release fails in `QuarkusUnitTest` with
+  `NoSuchMethodError: io.smallrye.config.ConfigMappingContext.applyBeanStyleGetters`, a SmallRye
+  Config binary mismatch reached from Quarkus's own generated `ApplicationConfig`. Found by running
+  the `compat` workflow's command locally before the workflow had ever run, so that job is expected
+  to be red until this is resolved.
 - The Quarkus native run covers the **mina** bundle only; the integration-tests app hardcodes it, so
   ROADMAP Phase 3's "both provider combinations in native" is not met.
 - MINA's `JceRandom$Cache` needs run-time initialisation for native image, and that registration sits

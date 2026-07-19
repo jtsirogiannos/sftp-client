@@ -1,0 +1,42 @@
+# Its own workflow because the trigger differs, not because the modules do: a native image needs a
+# different toolchain and takes minutes rather than seconds, and it rarely regresses on a per-PR
+# basis. Running it on main and on demand keeps pull requests fast while still catching the class of
+# breakage that only appears in a native image — the image-heap and reflection failures that a JVM
+# build cannot see.
+name: native
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    # No provider matrix: the integration-tests application declares the mina bundle, so running it
+    # twice would build the same binary twice. Parameterising the bundle is the way to cover jsch
+    # here, and that is not wired up yet.
+    steps:
+      - uses: actions/checkout@v4
+      # graalvm/setup-graalvm rather than actions/setup-java: "graalvm-community" is not a valid
+      # distribution for setup-java@v4 (it only lands in v5), and setup-java's "graalvm" means the
+      # Oracle build under the GFTC licence, which is not what we want. This action is the GraalVM
+      # team's own and puts native-image on PATH, so no `gu install` step is needed.
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          distribution: graalvm-community
+          # 25 matches the jdk-25 Mandrel builder image Quarkus 3.33 selects for container builds
+          # (quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-25), so the runner build and the
+          # container build target the same JDK. Switching to distribution: mandrel would match
+          # Quarkus upstream CI even more closely, and is the first thing to try if this drifts.
+          java-version: '25'
+          # Avoids GitHub API rate-limiting when resolving the release to download.
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: maven
+      # Fails loudly here if the toolchain is wrong, rather than surfacing later as a confusing
+      # Maven error deep in the native build.
+      - run: native-image --version
+      - run: ./mvnw -B verify -Pnative -pl integrations/quarkus/integration-tests -am

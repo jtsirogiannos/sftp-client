@@ -1,3 +1,11 @@
+# The default signal: every push and pull request, the whole reactor.
+#
+# Deliberately NOT split per domain (core / quarkus / spring). Each domain workflow would have to
+# build the api, core and providers first via -am, so three workflows would roughly double runner
+# time for the same signal, and the long pole — the core — would sit in all three. Failure
+# attribution comes from separate *jobs*, which is what the tck matrix below is for. Separate
+# workflow files are reserved for genuinely different triggers: see native.yml, compat.yml,
+# release.yml.
 name: build
 
 on:
@@ -5,8 +13,12 @@ on:
     branches: [ main ]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  build:
+  verify:
+    name: verify (JDK ${{ matrix.java }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -19,11 +31,12 @@ jobs:
           distribution: temurin
           java-version: ${{ matrix.java }}
           cache: maven
+      # verify, not test: the Quarkus integration-tests module runs its @QuarkusIntegrationTest
+      # suite in the integration-test phase, which `test` never reaches.
       - run: ./mvnw -B verify
 
-  # The TCK is the point of the SPI, so run it explicitly per provider rather than
-  # letting a single aggregate build hide which backend failed.
   tck:
+    name: tck (${{ matrix.provider }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -36,29 +49,7 @@ jobs:
           distribution: temurin
           java-version: 17
           cache: maven
+      # The TCK is the point of the SPI, so run it per provider rather than letting the aggregate
+      # build hide which backend failed. Docker is present on the runner, so the containerised
+      # OpenSSH fixture runs too and each provider is checked against two independent servers.
       - run: ./mvnw -B -pl sftp-provider-${{ matrix.provider }} -am test
-
-  native:
-    runs-on: ubuntu-latest
-    # No provider matrix: the integration-tests application declares the mina bundle, so running it
-    # twice would build the same binary twice. Parameterising the bundle is the way to cover jsch
-    # here, and that is not wired up yet.
-    steps:
-      - uses: actions/checkout@v4
-      # graalvm/setup-graalvm rather than actions/setup-java: "graalvm-community" is not a valid
-      # distribution for setup-java@v4 (it only lands in v5), and setup-java's "graalvm" means the
-      # Oracle build under the GFTC licence, which is not what we want. This action is the GraalVM
-      # team's own and puts native-image on PATH, so no `gu install` step is needed.
-      - uses: graalvm/setup-graalvm@v1
-        with:
-          distribution: graalvm-community
-          # 25 matches the jdk-25 Mandrel builder image Quarkus 3.33 selects for container builds
-          # (quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-25), so the runner build and the
-          # container build target the same JDK. Switching to distribution: mandrel would match
-          # Quarkus upstream CI even more closely, and is the first thing to try if this drifts.
-          java-version: '25'
-          # Avoids GitHub API rate-limiting when resolving the release to download.
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache: maven
-      - run: native-image --version
-      - run: ./mvnw -B verify -Pnative -pl integrations/quarkus/integration-tests -am
