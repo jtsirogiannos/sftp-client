@@ -300,6 +300,50 @@ public class AsyncReactiveSftpClientTest {
         }
 
         @Override
+        public CompletionStage<RemoteFile> lstatAsync(String path) {
+            calls.add("lstatAsync");
+            return CompletableFuture.completedFuture(file(path));
+        }
+
+        @Override
+        public CompletionStage<String> realpathAsync(String path) {
+            calls.add("realpathAsync");
+            return CompletableFuture.completedFuture(path);
+        }
+
+        @Override
+        public CompletionStage<Void> symlinkAsync(String linkPath, String targetPath) {
+            calls.add("symlinkAsync");
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletionStage<String> readlinkAsync(String linkPath) {
+            calls.add("readlinkAsync");
+            return CompletableFuture.completedFuture(linkPath);
+        }
+
+        @Override
+        public CompletionStage<Void> hardlinkAsync(String linkPath, String targetPath) {
+            calls.add("hardlinkAsync");
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletionStage<Void> setAttributesAsync(String path,
+                io.github.jtsirogiannos.sftp.client.api.AttributeUpdate update) {
+            calls.add("setAttributesAsync");
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletionStage<io.github.jtsirogiannos.sftp.client.api.FilesystemStats> statvfsAsync(
+                String path) {
+            calls.add("statvfsAsync");
+            return CompletableFuture.failedFuture(new UnsupportedOperationException("no statvfs"));
+        }
+
+        @Override
         public Flow.Publisher<ByteBuffer> readAsync(String path, long offset) {
             calls.add("readAsync");
             return publisherOf(CONTENT);

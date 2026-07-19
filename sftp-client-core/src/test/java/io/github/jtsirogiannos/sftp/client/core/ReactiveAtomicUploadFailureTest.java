@@ -122,6 +122,45 @@ public class ReactiveAtomicUploadFailureTest {
             throw new UnsupportedOperationException();
         }
 
+        // The rest of the contract; none of it is on the publish-by-rename path under test.
+
+        @Override
+        public CompletionStage<RemoteFile> lstat(String path) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CompletionStage<String> realpath(String path) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CompletionStage<Void> symlink(String linkPath, String targetPath) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CompletionStage<String> readlink(String linkPath) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CompletionStage<Void> hardlink(String linkPath, String targetPath) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CompletionStage<Void> setAttributes(String path,
+                io.github.jtsirogiannos.sftp.client.api.AttributeUpdate update) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CompletionStage<io.github.jtsirogiannos.sftp.client.api.FilesystemStats> statvfs(
+                String path) {
+            throw new UnsupportedOperationException();
+        }
+
         @Override
         public CompletionStage<RemoteFile> stat(String path) {
             throw new UnsupportedOperationException();

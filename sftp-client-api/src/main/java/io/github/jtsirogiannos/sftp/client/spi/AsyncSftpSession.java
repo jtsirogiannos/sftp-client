@@ -1,5 +1,7 @@
 package io.github.jtsirogiannos.sftp.client.spi;
 
+import io.github.jtsirogiannos.sftp.client.api.AttributeUpdate;
+import io.github.jtsirogiannos.sftp.client.api.FilesystemStats;
 import io.github.jtsirogiannos.sftp.client.api.RemoteFile;
 
 import java.nio.ByteBuffer;
@@ -80,6 +82,55 @@ public interface AsyncSftpSession extends SftpSessionLifecycle {
      * subtlety that applies equally here.
      */
     CompletionStage<Void> removeAsync(String path);
+
+    /**
+     * Attributes of a path <strong>without following symlinks</strong>.
+     *
+     * <p>The counterpart to {@link #statAsync}, and the difference is not academic: anything that
+     * walks a tree must use this, or a symlink is reported as its target and the walk follows it out
+     * of the tree it was given.
+     */
+    CompletionStage<RemoteFile> lstatAsync(String path);
+
+    /**
+     * Resolves a path to its canonical absolute form, expanding {@code .}, {@code ..} and the
+     * server's notion of the login directory.
+     */
+    CompletionStage<String> realpathAsync(String path);
+
+    /**
+     * Creates a symbolic link at {@code linkPath} pointing at {@code targetPath}.
+     *
+     * @throws UnsupportedOperationException if {@link SftpCapabilities#symlinks()} is false
+     */
+    CompletionStage<Void> symlinkAsync(String linkPath, String targetPath);
+
+    /**
+     * The target a symbolic link points at, unresolved.
+     *
+     * @throws UnsupportedOperationException if {@link SftpCapabilities#symlinks()} is false
+     */
+    CompletionStage<String> readlinkAsync(String linkPath);
+
+    /**
+     * Creates a hard link, an OpenSSH extension rather than base protocol.
+     *
+     * @throws UnsupportedOperationException if {@link SftpCapabilities#hardLinks()} is false
+     */
+    CompletionStage<Void> hardlinkAsync(String linkPath, String targetPath);
+
+    /**
+     * Applies a partial attribute update. Fields the update leaves unset must be left alone rather
+     * than reset to a default — the whole point of {@link AttributeUpdate} being partial.
+     */
+    CompletionStage<Void> setAttributesAsync(String path, AttributeUpdate update);
+
+    /**
+     * Filesystem space and inode counts, an OpenSSH extension.
+     *
+     * @throws UnsupportedOperationException if {@link SftpCapabilities#statvfs()} is false
+     */
+    CompletionStage<FilesystemStats> statvfsAsync(String path);
 
     /**
      * The file's bytes, emitted as they arrive.

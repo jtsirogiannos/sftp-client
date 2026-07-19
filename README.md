@@ -288,6 +288,9 @@ binary.
 - No retry or backoff on transient failures, no metrics, no health checks. Observability
   (Micrometer, OpenTelemetry) and Quarkus Dev Services are written up in [ROADMAP.md](ROADMAP.md)
   under "Backlog", each with the design question that has to be settled first.
-- The reactive facade has no equivalent of most `SftpClient` convenience methods — `mkdirs`,
-  `deleteRecursively`, `visit`, `findFirst` and the `Path` transfers are blocking-only.
-  `uploadAtomically` is the exception and exists on both.
+- The reactive facade still lacks `visit` and the `java.nio.file.Path` transfers. `visit` needs a
+  streaming listing to be worth having (its blocking form stops the walk early, which
+  `CompletionStage<List<..>>` cannot express), and `Path` transfers would put blocking file I/O
+  behind a reactive signature without letting the caller choose the scheduler. Everything else —
+  `mkdirs`, `deleteRecursively`, `chmod`, `findFirst`, filtered `list`, `uploadAtomically` — is on
+  both facades.

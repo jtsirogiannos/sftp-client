@@ -1,9 +1,13 @@
 package io.github.jtsirogiannos.sftp.client.api;
 
 import io.github.jtsirogiannos.sftp.client.spi.SftpCapabilities;
+import io.github.jtsirogiannos.sftp.client.spi.SftpSession;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Flow;
@@ -40,6 +44,30 @@ public interface ReactiveSftpClient extends AutoCloseable {
     CompletionStage<Void> rename(String from, String to);
 
     CompletionStage<Void> remove(String path);
+
+    /**
+     * Attributes of a path <strong>without following symlinks</strong> — the counterpart to
+     * {@link #stat}, and what anything walking a tree has to use.
+     */
+    CompletionStage<RemoteFile> lstat(String path);
+
+    /** Resolves a path to its canonical absolute form, expanding {@code .}, {@code ..} and home. */
+    CompletionStage<String> realpath(String path);
+
+    /** Creates a symbolic link at {@code linkPath} pointing at {@code targetPath}. */
+    CompletionStage<Void> symlink(String linkPath, String targetPath);
+
+    /** The target a symbolic link points at, unresolved. */
+    CompletionStage<String> readlink(String linkPath);
+
+    /** Creates a hard link. Requires {@link SftpCapabilities#hardLinks()}. */
+    CompletionStage<Void> hardlink(String linkPath, String targetPath);
+
+    /** Applies a partial attribute update, leaving unset fields alone. */
+    CompletionStage<Void> setAttributes(String path, AttributeUpdate update);
+
+    /** Filesystem space and inode counts. Requires {@link SftpCapabilities#statvfs()}. */
+    CompletionStage<FilesystemStats> statvfs(String path);
 
     /**
      * Streams a remote file as backpressured chunks. Cancelling the subscription interrupts the
@@ -112,6 +140,117 @@ public interface ReactiveSftpClient extends AutoCloseable {
                 }
                 return CompletableFuture.<Void>failedFuture(original);
             });
+    }
+
+    // --- convenience, composed entirely from the operations above ---
+    //
+    // Default methods for the same reason as their blocking counterparts: anything expressible from
+    // the primitives stays out of the implementations, so neither reactive client writes them and a
+    // future one gets them free.
+
+    /** Directory entries matching a predicate. Filtered client-side; SFTP has no server-side glob. */
+    default CompletionStage<List<RemoteFile>> list(String path, Predicate<RemoteFile> filter) {
+        return list(path).thenApply(entries -> entries.stream().filter(filter).toList());
+    }
+
+    /**
+     * The first entry matching {@code match}, if any.
+     *
+     * <p>Unlike {@link SftpOperations#findFirst}, this fetches the whole listing before filtering:
+     * the blocking form can stop the walk early because it drives the visitor itself, and there is
+     * no equivalent here while {@link #list} returns a completed list rather than a stream. For a
+     * directory large enough that the difference matters, prefer streaming the listing yourself.
+     */
+    default CompletionStage<Optional<RemoteFile>> findFirst(String path,
+            Predicate<RemoteFile> match) {
+        return list(path).thenApply(entries -> entries.stream().filter(match).findFirst());
+    }
+
+    /** Sets permissions, the common case of {@link #setAttributes}. */
+    default CompletionStage<Void> chmod(String path, int mode) {
+        return setAttributes(path, AttributeUpdate.builder().permissions(mode).build());
+    }
+
+    /**
+     * Creates a directory and any missing parents, like {@code mkdir -p}.
+     *
+     * <p>An already-existing directory is not an error, and neither is losing the race to a
+     * concurrent creator: if the path exists afterwards, the goal is met.
+     */
+    default CompletionStage<Void> mkdirs(String path) {
+        String normalised = path.endsWith("/") && path.length() > 1
+            ? path.substring(0, path.length() - 1)
+            : path;
+        if (normalised.isEmpty() || "/".equals(normalised)) {
+            return CompletableFuture.completedFuture(null);
+        }
+        // Built iteratively rather than by recursing through thenCompose: against a provider whose
+        // stages are already complete the composition runs inline, and a recursive chain would grow
+        // the stack once per path segment.
+        CompletionStage<Void> chain = CompletableFuture.completedFuture(null);
+        StringBuilder progress = new StringBuilder();
+        for (String segment : normalised.split("/")) {
+            if (segment.isEmpty()) {
+                continue;
+            }
+            progress.append('/').append(segment);
+            String current = progress.toString();
+            chain = chain.thenCompose(ignored -> createIfAbsent(current));
+        }
+        return chain;
+    }
+
+    private CompletionStage<Void> createIfAbsent(String path) {
+        return exists(path).thenCompose(present -> present
+            ? CompletableFuture.<Void>completedFuture(null)
+            : mkdir(path)
+                .handle((created, failure) -> failure)
+                .thenCompose(failure -> failure == null
+                    ? CompletableFuture.<Void>completedFuture(null)
+                    // Someone else may have created it between the check and the call.
+                    : exists(path).thenCompose(nowPresent -> nowPresent
+                        ? CompletableFuture.<Void>completedFuture(null)
+                        : CompletableFuture.<Void>failedFuture(AtomicPublish.unwrap(failure)))));
+    }
+
+    /**
+     * Deletes a path and everything beneath it, returning how many entries were removed.
+     *
+     * <p><strong>Symlinks are removed as links, never followed.</strong> That is why this walks with
+     * {@link #lstat} and not {@link #stat}: {@code stat} resolves a link and reports the target, so
+     * a link to a directory would look like a directory and the walk would descend out of the tree
+     * it was given and delete somebody else's files.
+     */
+    default CompletionStage<Integer> deleteRecursively(String path) {
+        if ("/".equals(path)) {
+            // Refusing outright: nothing good follows from a typo'd variable expanding to "/".
+            return CompletableFuture.failedFuture(
+                new SftpException("refusing to delete the remote root directory"));
+        }
+        return exists(path).thenCompose(present -> {
+            if (!present) {
+                return CompletableFuture.completedFuture(0);
+            }
+            return lstat(path).thenCompose(entry -> {
+                if (!entry.directory() || entry.symlink()) {
+                    return remove(path).thenApply(removed -> 1);
+                }
+                return list(path)
+                    .thenCompose(this::sequentially)
+                    .thenCompose(beneath -> remove(path).thenApply(removed -> beneath + 1));
+            });
+        });
+    }
+
+    /** Folds the children iteratively, so breadth does not become stack depth. */
+    private CompletionStage<Integer> sequentially(List<RemoteFile> children) {
+        CompletionStage<Integer> chain = CompletableFuture.completedFuture(0);
+        for (RemoteFile child : children) {
+            String childPath = child.path();
+            chain = chain.thenCompose(
+                count -> deleteRecursively(childPath).thenApply(removed -> count + removed));
+        }
+        return chain;
     }
 
     SftpCapabilities capabilities();

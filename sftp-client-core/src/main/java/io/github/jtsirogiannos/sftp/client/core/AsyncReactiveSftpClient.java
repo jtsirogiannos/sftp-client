@@ -1,6 +1,8 @@
 package io.github.jtsirogiannos.sftp.client.core;
 
 import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClient;
+import io.github.jtsirogiannos.sftp.client.api.AttributeUpdate;
+import io.github.jtsirogiannos.sftp.client.api.FilesystemStats;
 import io.github.jtsirogiannos.sftp.client.api.RemoteFile;
 import io.github.jtsirogiannos.sftp.client.api.SftpException;
 import io.github.jtsirogiannos.sftp.client.pool.SftpSessionPool;
@@ -77,6 +79,41 @@ public class AsyncReactiveSftpClient implements ReactiveSftpClient {
     @Override
     public CompletionStage<Void> remove(String path) {
         return onSession(session -> session.removeAsync(path));
+    }
+
+    @Override
+    public CompletionStage<RemoteFile> lstat(String path) {
+        return onSession(session -> session.lstatAsync(path));
+    }
+
+    @Override
+    public CompletionStage<String> realpath(String path) {
+        return onSession(session -> session.realpathAsync(path));
+    }
+
+    @Override
+    public CompletionStage<Void> symlink(String linkPath, String targetPath) {
+        return onSession(session -> session.symlinkAsync(linkPath, targetPath));
+    }
+
+    @Override
+    public CompletionStage<String> readlink(String linkPath) {
+        return onSession(session -> session.readlinkAsync(linkPath));
+    }
+
+    @Override
+    public CompletionStage<Void> hardlink(String linkPath, String targetPath) {
+        return onSession(session -> session.hardlinkAsync(linkPath, targetPath));
+    }
+
+    @Override
+    public CompletionStage<Void> setAttributes(String path, AttributeUpdate update) {
+        return onSession(session -> session.setAttributesAsync(path, update));
+    }
+
+    @Override
+    public CompletionStage<FilesystemStats> statvfs(String path) {
+        return onSession(session -> session.statvfsAsync(path));
     }
 
     @Override

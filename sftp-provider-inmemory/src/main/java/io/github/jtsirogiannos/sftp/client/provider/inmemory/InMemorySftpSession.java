@@ -257,6 +257,50 @@ final class InMemorySftpSession implements SftpSession, AsyncSftpSession {
     }
 
     @Override
+    public CompletionStage<RemoteFile> lstatAsync(String path) {
+        return complete(() -> lstat(path));
+    }
+
+    @Override
+    public CompletionStage<String> realpathAsync(String path) {
+        return complete(() -> realpath(path));
+    }
+
+    @Override
+    public CompletionStage<Void> symlinkAsync(String linkPath, String targetPath) {
+        return complete(() -> {
+            symlink(linkPath, targetPath);
+            return null;
+        });
+    }
+
+    @Override
+    public CompletionStage<String> readlinkAsync(String linkPath) {
+        return complete(() -> readlink(linkPath));
+    }
+
+    @Override
+    public CompletionStage<Void> hardlinkAsync(String linkPath, String targetPath) {
+        return complete(() -> {
+            hardlink(linkPath, targetPath);
+            return null;
+        });
+    }
+
+    @Override
+    public CompletionStage<Void> setAttributesAsync(String path, AttributeUpdate update) {
+        return complete(() -> {
+            setAttributes(path, update);
+            return null;
+        });
+    }
+
+    @Override
+    public CompletionStage<FilesystemStats> statvfsAsync(String path) {
+        return complete(() -> statvfs(path));
+    }
+
+    @Override
     public Flow.Publisher<ByteBuffer> readAsync(String path, long offset) {
         byte[] content;
         try {

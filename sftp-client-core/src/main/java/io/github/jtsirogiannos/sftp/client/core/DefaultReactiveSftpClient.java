@@ -1,6 +1,8 @@
 package io.github.jtsirogiannos.sftp.client.core;
 
 import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClient;
+import io.github.jtsirogiannos.sftp.client.api.AttributeUpdate;
+import io.github.jtsirogiannos.sftp.client.api.FilesystemStats;
 import io.github.jtsirogiannos.sftp.client.api.RemoteFile;
 import io.github.jtsirogiannos.sftp.client.api.SftpException;
 import io.github.jtsirogiannos.sftp.client.pool.SftpSessionPool;
@@ -79,6 +81,41 @@ public class DefaultReactiveSftpClient implements ReactiveSftpClient {
     @Override
     public CompletionStage<Void> remove(String path) {
         return onSessionVoid(s -> s.remove(path));
+    }
+
+    @Override
+    public CompletionStage<RemoteFile> lstat(String path) {
+        return onSession(s -> s.lstat(path));
+    }
+
+    @Override
+    public CompletionStage<String> realpath(String path) {
+        return onSession(s -> s.realpath(path));
+    }
+
+    @Override
+    public CompletionStage<Void> symlink(String linkPath, String targetPath) {
+        return onSessionVoid(s -> s.symlink(linkPath, targetPath));
+    }
+
+    @Override
+    public CompletionStage<String> readlink(String linkPath) {
+        return onSession(s -> s.readlink(linkPath));
+    }
+
+    @Override
+    public CompletionStage<Void> hardlink(String linkPath, String targetPath) {
+        return onSessionVoid(s -> s.hardlink(linkPath, targetPath));
+    }
+
+    @Override
+    public CompletionStage<Void> setAttributes(String path, AttributeUpdate update) {
+        return onSessionVoid(s -> s.setAttributes(path, update));
+    }
+
+    @Override
+    public CompletionStage<FilesystemStats> statvfs(String path) {
+        return onSession(s -> s.statvfs(path));
     }
 
     @Override

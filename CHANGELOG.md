@@ -31,6 +31,10 @@ Nothing has been published to Maven Central. The API is still free to change.
   See [ADR 0002](docs/adr/0002-sibling-session-contracts.md).
 - `uploadAtomically` on both the blocking and reactive facades, publishing by rename.
   See [ADR 0004](docs/adr/0004-publish-by-rename.md).
+- Reactive facade parity: `lstat`, `realpath`, `symlink`, `readlink`, `hardlink`, `setAttributes`
+  and `statvfs` on `ReactiveSftpClient` and `AsyncSftpSession`, plus `mkdirs`,
+  `deleteRecursively`, `chmod`, `findFirst` and filtered `list` as default methods composed from
+  them. `visit` and the `Path` transfers remain blocking-only.
 
 ### Changed
 
