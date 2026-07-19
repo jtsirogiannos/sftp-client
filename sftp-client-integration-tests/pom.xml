@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.github.jtsirogiannos</groupId>
+        <artifactId>sftp-client-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>sftp-client-integration-tests</artifactId>
+    <name>SFTP Client :: Integration Tests</name>
+    <description>
+        Exercises the client facades against real providers and a real server. Test-only; not published.
+    </description>
+
+    <properties>
+        <maven.deploy.skip>true</maven.deploy.skip>
+        <maven.install.skip>true</maven.install.skip>
+    </properties>
+
+    <!--
+      Why this module exists.
+
+      The interesting failures of the last few changes were all in the same blind spot: code in the
+      core, driven through a real provider, against a real server. Nothing could host that test.
+      sftp-client-core must never depend on a provider — that separation is the whole point of the
+      module — providers depend only on the contract, and the TCK verifies the SPI rather than the
+      facades above it. So the combination went untested, and two bugs shipped through the gap: a
+      remove() that could not delete directories, and a deleteRecursively() that followed symlinks out
+      of the tree because stat() resolves them.
+
+      Sitting above everything, this module may depend on all of it without inverting any layer. It is
+      the top of the test pyramid: unit tests in core, contract tests in the TCK, and here the
+      integration nobody else can see.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>sftp-client-core</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>sftp-provider-mina</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>sftp-provider-jsch</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>sftp-provider-inmemory</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- For EmbeddedSftpServer; the conformance suite itself runs in the provider modules. -->
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>sftp-client-tck</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

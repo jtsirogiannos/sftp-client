@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.github.jtsirogiannos</groupId>
+        <artifactId>sftp-client-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>sftp-provider-inmemory</artifactId>
+    <name>SFTP Client :: Provider :: In-Memory</name>
+    <description>
+        An in-memory SFTP backend for tests: no server, no network, no Docker. Passes the same
+        conformance suite as the real providers.
+    </description>
+
+    <!--
+      Two jobs, and the second is the reason it is worth building even though nobody ships it to
+      production.
+
+      For consumers: unit-test code that talks to SftpClient without standing up a server. Add it at
+      test scope, ask for the "inmemory" provider, and the whole library behaves normally.
+
+      For this project: a third implementation is a forcing function. Two providers can share a
+      blind spot — both wrap a real SSH client, both were written by the same person on the same day
+      against the same drafts. A backend with no sockets at all can only pass the TCK if the contract
+      is genuinely about SFTP semantics rather than about how JSch or MINA happen to behave.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>sftp-client-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>sftp-client-tck</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

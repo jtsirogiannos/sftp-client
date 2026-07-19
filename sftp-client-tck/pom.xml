@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.github.jtsirogiannos</groupId>
+        <artifactId>sftp-client-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>sftp-client-tck</artifactId>
+    <name>SFTP Client :: TCK</name>
+    <description>
+        Conformance suite every provider must pass. Ships in main (not test) scope: providers depend on
+        this jar at test scope and extend SftpProviderConformanceTest once.
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>sftp-client-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- Compile scope on purpose: the suite is consumed as a library, so its JUnit/AssertJ and
+             the in-process SSHD server it boots must come along for the provider that extends it. -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.sshd</groupId>
+            <artifactId>sshd-core</artifactId>
+            <version>${sshd.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.sshd</groupId>
+            <artifactId>sshd-sftp</artifactId>
+            <version>${sshd.version}</version>
+        </dependency>
+
+        <!--
+          Optional: only OpenSshSftpServer needs it, and only for providers that opt into the
+          containerised OpenSSH run. Non-optional, this would put Docker machinery on the compile
+          classpath of every provider that only wants the embedded fixture.
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>${testcontainers.version}</version>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+</project>

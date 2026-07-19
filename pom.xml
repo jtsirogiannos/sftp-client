@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.github.jtsirogiannos</groupId>
+  <artifactId>sftp-client-parent</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <name>SFTP Client Parent</name>
+  <description>Framework-agnostic SFTP client with pluggable JSch / Apache MINA SSHD providers</description>
+  <url>https://github.com/jtsirogiannos/sftp-client</url>
+
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <id>jtsirogiannos</id>
+      <!-- Maven Central requires a human-readable name here before a release. -->
+      <name>CHANGEME</name>
+    </developer>
+  </developers>
+
+  <!-- Required by Maven Central -->
+  <scm>
+    <connection>scm:git:https://github.com/jtsirogiannos/sftp-client.git</connection>
+    <developerConnection>scm:git:git@github.com:jtsirogiannos/sftp-client.git</developerConnection>
+    <url>https://github.com/jtsirogiannos/sftp-client</url>
+    <tag>HEAD</tag>
+  </scm>
+
+  <properties>
+    <maven.compiler.release>17</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <!-- Verify before first build; all version bumps happen here. -->
+    <jsch.version>2.28.4</jsch.version>              <!-- com.github.mwiede fork; 0.2.x scheme ended, this fork is on 2.x -->
+    <!-- Kept in step with what quarkus-sshd pulls in. At 2.15.0 the Quarkus integration test
+         resolved sshd-core 2.17.1 against sshd-sftp 2.15.0: sshd-sftp builds on sshd-core
+         internals, and the two are released as a set, so a split like that is a latent bug. -->
+    <sshd.version>2.17.1</sshd.version>
+    <quarkus.version>3.33.2</quarkus.version>        <!-- 3.33.4 never existed; .2 is the last on this line. 3.37.3 is latest. CONFIRM the LTS line on quarkus.io before release -->
+    <quarkus-sshd.version>1.2.0</quarkus-sshd.version>
+    <quarkus-jsch.version>3.2.0</quarkus-jsch.version>   <!-- VERIFY: not build-tested -->
+    <spring-boot.version>4.1.0</spring-boot.version> <!-- 3.5 went EOL 2026-06-30 -->
+    <junit.version>5.11.4</junit.version>
+    <assertj.version>3.27.3</assertj.version>
+    <reactive-streams.version>1.0.4</reactive-streams.version>
+    <testcontainers.version>2.0.5</testcontainers.version>
+    <slf4j.version>2.0.18</slf4j.version>
+    <kotlin.version>2.4.10</kotlin.version>
+    <kotlinx-coroutines.version>1.11.0</kotlinx-coroutines.version>
+    <central-plugin.version>0.8.0</central-plugin.version>
+  </properties>
+
+  <modules>
+    <module>sftp-client-bom</module>
+    <module>sftp-client-api</module>
+    <module>sftp-client-core</module>
+    <module>sftp-provider-jsch</module>
+    <module>sftp-provider-mina</module>
+    <module>sftp-provider-inmemory</module>
+    <module>sftp-client-tck</module>
+    <!-- Last: it consumes core and both providers, as an application would. -->
+    <module>sftp-client-kotlin</module>
+    <module>sftp-client-integration-tests</module>
+    <module>quarkus-sftp-client</module>
+    <module>sftp-client-spring-boot-autoconfigure</module>
+    <module>sftp-client-spring-boot-starter</module>
+    <module>sftp-client-spring-boot-starter-reactive</module>
+  </modules>
+
+  <dependencyManagement>
+    <dependencies>
+      <!--
+        NOT importing sftp-client-bom here: the BOM's parent is this POM, so importing it would
+        make this POM import itself (Maven fails with an import cycle). The BOM is for downstream
+        consumers; our own modules inherit this dependencyManagement directly and pin internal
+        deps with ${project.version}.
+      -->
+      <dependency>
+        <groupId>org.junit</groupId>
+        <artifactId>junit-bom</artifactId>
+        <version>${junit.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.assertj</groupId>
+        <artifactId>assertj-core</artifactId>
+        <version>${assertj.version}</version>
+      </dependency>
+      <!--
+        The API only. A library that ships a logging *implementation* picks the fight for its
+        users; slf4j-api is the one dependency that lets them keep choosing.
+      -->
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-api</artifactId>
+        <version>${slf4j.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-jdk14</artifactId>
+        <version>${slf4j.version}</version>
+        <scope>test</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <!-- Pinned so modules that configure the compiler (e.g. the Quarkus deployment module's
+             annotation processor) don't inherit an unversioned plugin, which Maven warns about
+             and future versions will reject. -->
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>3.15.0</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.5.2</version>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <!-- mvn -Prelease deploy : Central Portal (OSSRH was sunset 2025-06-30) -->
+    <profile>
+      <id>release</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.sonatype.central</groupId>
+            <artifactId>central-publishing-maven-plugin</artifactId>
+            <version>${central-plugin.version}</version>
+            <extensions>true</extensions>
+            <configuration>
+              <publishingServerId>central</publishingServerId>
+              <autoPublish>true</autoPublish>
+              <waitUntil>published</waitUntil>
+            </configuration>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-source-plugin</artifactId>
+            <version>3.3.1</version>
+            <executions>
+              <execution><id>attach-sources</id><goals><goal>jar-no-fork</goal></goals></execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-javadoc-plugin</artifactId>
+            <version>3.11.2</version>
+            <executions>
+              <execution><id>attach-javadocs</id><goals><goal>jar</goal></goals></execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-gpg-plugin</artifactId>
+            <version>3.2.7</version>
+            <executions>
+              <execution><id>sign-artifacts</id><phase>verify</phase><goals><goal>sign</goal></goals></execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

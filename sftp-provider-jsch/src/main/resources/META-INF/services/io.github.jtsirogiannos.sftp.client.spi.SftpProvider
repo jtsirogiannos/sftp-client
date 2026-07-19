@@ -1,0 +1,2 @@
+# Makes SftpClients.blocking("jsch", ...) resolvable simply by having this jar on the classpath.
+io.github.jtsirogiannos.sftp.client.provider.jsch.JschSftpProvider

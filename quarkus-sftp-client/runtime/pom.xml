@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.github.jtsirogiannos</groupId>
+        <artifactId>quarkus-sftp-client-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>quarkus-sftp-client</artifactId>
+    <name>Quarkus SFTP Client :: Runtime</name>
+    <description>
+        @ConfigMapping, the @NamedSftp qualifier, and the MutinySftpClient adapter. Mutiny 2 is
+        natively Flow-based, so this is a type shim over the core publisher - no bridge jar.
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.github.jtsirogiannos</groupId>
+            <artifactId>sftp-client-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-mutiny</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-vertx</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+              The @ConfigRoot mappings live in this module, and it is this annotation processor that
+              registers them with the config system - without it every lookup fails at build time with
+              "Could not find a mapping for ...". It belongs wherever the config roots are, which is here
+              rather than in the deployment module.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>io.quarkus</groupId>
+                            <artifactId>quarkus-extension-processor</artifactId>
+                            <version>${quarkus.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <!--
+              Builds META-INF/jandex.idx into the jar. ARC needs the @NamedSftp qualifier as a ClassInfo
+              when the deployment module attaches it to a synthetic bean; without an index a real
+              application build fails with "Annotation class not available: @NamedSftp". It does not show
+              up in QuarkusUnitTest, where the runtime classes are a directory on the classpath and get
+              indexed for free — only when the runtime is consumed as a jar, which is every real consumer.
+            -->
+            <plugin>
+                <groupId>io.smallrye</groupId>
+                <artifactId>jandex-maven-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <id>make-index</id>
+                        <goals>
+                            <goal>jandex</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-extension-maven-plugin</artifactId>
+                <version>${quarkus.version}</version>
+                <executions>
+                    <execution>
+                        <phase>process-resources</phase>
+                        <goals><goal>extension-descriptor</goal></goals>
+                        <configuration>
+                            <deployment>${project.groupId}:quarkus-sftp-client-deployment:${project.version}</deployment>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

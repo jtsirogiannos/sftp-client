@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.github.jtsirogiannos</groupId>
+        <artifactId>quarkus-sftp-client-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>quarkus-sftp-client-jsch</artifactId>
+    <packaging>pom</packaging>
+    <name>Quarkus SFTP Client :: jsch</name>
+    <description>
+        JSch provider bundle. Inherits native-image registration from quarkus-jsch.
+        Deliberately code-free: it exists so users add ONE artifact to pick a driver, exactly like
+        dropping postgresql.jar on the classpath. Native-image config is inherited, never re-declared.
+    </description>
+
+    <dependencies>
+        <dependency><groupId>io.github.jtsirogiannos</groupId><artifactId>quarkus-sftp-client</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>io.github.jtsirogiannos</groupId><artifactId>sftp-provider-jsch</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>io.quarkiverse.jsch</groupId><artifactId>quarkus-jsch</artifactId><version>${quarkus-jsch.version}</version></dependency>
+    </dependencies>
+</project>

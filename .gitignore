@@ -1,0 +1,76 @@
+# --- Maven build output ---
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.flattened-pom.xml
+
+# --- Maven wrapper ---
+# The wrapper is COMMITTED on purpose: mvnw, mvnw.cmd and .mvn/wrapper/maven-wrapper.properties
+# are what pin everyone (and CI) to the same Maven version. Ignoring them is a classic mistake -
+# many stock templates ignore .mvn/wrapper/maven-wrapper.jar, which is harmless here only because
+# distributionType=only-script means no jar exists. The negations below keep it that way if
+# someone later pastes a broader rule in.
+!/mvnw
+!/mvnw.cmd
+!/.mvn/wrapper/maven-wrapper.properties
+.mvn/timing.properties
+.mvn/.develocity/
+
+# --- Quarkus ---
+.quarkus/
+# Native-image build leftovers from `-Pnative`
+*.build_artifacts.txt
+/quarkus-sftp-client/**/build/
+
+# --- Credentials and key material ---
+# This is an SFTP library: its test fixtures boot a real in-process SSH server, and MINA SSHD's
+# default host-key provider writes hostkey.ser next to the working directory. Nothing here should
+# ever reach a public repo, so the patterns are deliberately broad.
+hostkey.ser
+known_hosts
+*.pem
+*.p12
+*.jks
+id_rsa
+id_rsa.pub
+id_ecdsa
+id_ecdsa.pub
+id_ed25519
+id_ed25519.pub
+**/src/test/resources/**/*-key
+local.properties
+*.local.yaml
+*.local.yml
+
+# --- Java runtime debris ---
+*.class
+hs_err_pid*
+replay_pid*
+*.hprof
+
+# --- IDEs ---
+# IntelliJ generates its own .idea/.gitignore that commits shared project config. This ignores the
+# whole directory instead, which is the usual convention for a public library - contributors'
+# IDE settings should not churn the repo. Delete these two lines if you would rather share it.
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+bin/
+nbproject/private/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+*.swp
+*~

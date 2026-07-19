@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.github.jtsirogiannos</groupId>
+        <artifactId>quarkus-sftp-client-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>quarkus-sftp-client-integration-tests</artifactId>
+    <name>Quarkus SFTP Client :: Integration Tests</name>
+    <description>
+        A real Quarkus application using the extension, exercised over HTTP so the same tests can run
+        against the JVM jar and against a native binary. Not published.
+    </description>
+
+    <properties>
+        <!-- Nothing here belongs on Maven Central; it is a test harness. -->
+        <maven.deploy.skip>true</maven.deploy.skip>
+        <maven.install.skip>true</maven.install.skip>
+    </properties>
+
+    <dependencies>
+        <!--
+          The BYO-driver bundle, exactly as an application would declare it - one artifact to pick a
+          driver. It is pom-packaged (code-free by design), hence type=pom. This also means the
+          integration test covers the bundle's dependency wiring, not just the extension.
+        -->
+        <dependency>
+            <groupId>io.github.jtsirogiannos</groupId>
+            <artifactId>quarkus-sftp-client-mina</artifactId>
+            <version>${project.version}</version>
+            <type>pom</type>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit</artifactId> <!-- renamed from quarkus-junit5 in Quarkus 3.31 -->
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>rest-assured</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- The in-process SFTP server the application talks to. Test scope: it runs in the test JVM,
+             never inside the application under test - which is what lets the native binary use it too. -->
+        <dependency>
+            <groupId>io.github.jtsirogiannos</groupId>
+            <artifactId>sftp-client-tck</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-maven-plugin</artifactId>
+                <extensions>true</extensions>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>build</goal>
+                            <goal>generate-code</goal>
+                            <goal>generate-code-tests</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+            <!--
+              Failsafe runs the *IT classes against the packaged application rather than an in-JVM one.
+              Left enabled in ordinary builds: in JVM mode it launches the runner jar, which is a genuine
+              check that packaging works, and costs a few seconds. -Pnative swaps the jar for a binary.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>3.5.2</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                        <configuration>
+                            <systemPropertyVariables>
+                                <native.image.path>${project.build.directory}/${project.build.finalName}-runner</native.image.path>
+                                <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                            </systemPropertyVariables>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <profile>
+            <id>native</id>
+            <activation>
+                <property>
+                    <name>native</name>
+                </property>
+            </activation>
+            <properties>
+                <quarkus.native.enabled>true</quarkus.native.enabled>
+                <!--
+                  Deliberately NOT setting quarkus.native.container-build here. CI runs on Linux with the
+                  graalvm-community JDK, so native-image is on PATH and produces a binary the *IT tests can
+                  then execute.
+
+                  Without a local GraalVM you can still build with:
+
+                      ./mvnw verify -Pnative -Dquarkus.native.container-build=true
+
+                  but be aware the builder image is Linux: on macOS or Windows that produces a Linux binary,
+                  the build succeeds, and the *IT run then fails with exit code 126 (not executable). The
+                  build is still worth doing there - it is what catches image-heap problems like MINA's
+                  JceRandom - but only a Linux host verifies the binary actually runs.
+                -->
+            </properties>
+        </profile>
+    </profiles>
+</project>

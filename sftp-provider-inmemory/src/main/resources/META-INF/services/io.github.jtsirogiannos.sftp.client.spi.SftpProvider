@@ -1,0 +1,2 @@
+# Makes SftpClients.blocking("inmemory", ...) resolvable. Intended for test classpaths.
+io.github.jtsirogiannos.sftp.client.provider.inmemory.InMemorySftpProvider

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.github.jtsirogiannos</groupId>
+        <artifactId>quarkus-sftp-client-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>quarkus-sftp-client-deployment</artifactId>
+    <name>Quarkus SFTP Client :: Deployment</name>
+    <description>Build steps: one synthetic bean per configured endpoint, qualified by @NamedSftp.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>quarkus-sftp-client</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-core-deployment</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc-deployment</artifactId>
+        </dependency>
+        <!--
+          Quarkus enforces this: for every extension the runtime module depends on, the deployment
+          module must depend on the matching -deployment artifact. quarkus-mutiny and quarkus-vertx
+          are runtime deps, so these two are mandatory - the extension-descriptor goal fails the build
+          without them. Their own transitive deployment deps (context-propagation, netty,
+          virtual-threads) come along automatically and must not be listed by hand.
+        -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-mutiny-deployment</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-vertx-deployment</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit-internal</artifactId> <!-- renamed from quarkus-junit5-internal in Quarkus 3.31 -->
+            <scope>test</scope>
+        </dependency>
+        <!--
+          A real driver and the TCK's in-process server, test scope only. QuarkusUnitTest boots an
+          actual application, so with these the tests inject a client and transfer a file rather than
+          merely asserting that a bean definition exists.
+        -->
+        <dependency>
+            <groupId>io.github.jtsirogiannos</groupId>
+            <artifactId>sftp-provider-mina</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.github.jtsirogiannos</groupId>
+            <artifactId>sftp-client-tck</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <!--
+                          QuarkusUnitTest installs the JBoss LogManager, which JUL only allows before any
+                          logging has initialised. It has to be set here, at JVM start: setting it from test
+                          code is already too late if anything on the classpath has touched a Logger.
+                        -->
+                        <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>io.quarkus</groupId>
+                            <artifactId>quarkus-extension-processor</artifactId>
+                            <version>${quarkus.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

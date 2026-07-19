@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xmlns="http://maven.apache.org/POM/4.0.0"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.github.jtsirogiannos</groupId>
+        <artifactId>sftp-client-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>sftp-client-api</artifactId>
+    <name>SFTP Client :: API</name>
+    <description>Provider contract and client facades. JDK types only - no framework, no third-party runtime
+        dependencies.
+    </description>
+
+    <!--
+      INTENTIONALLY EMPTY <dependencies>. Anything added here becomes a dependency of every
+      third-party provider author. Flow.Publisher/CompletionStage keep this at zero.
+      If this list ever grows, Phase 0 has regressed.
+    -->
+</project>

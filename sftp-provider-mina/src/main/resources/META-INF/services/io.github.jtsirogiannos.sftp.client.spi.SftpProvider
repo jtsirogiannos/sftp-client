@@ -1,0 +1,4 @@
+# Makes SftpClients.blocking("mina", ...) resolvable simply by having this jar on the classpath.
+# This one line is the entire "installation" of a provider, and it is why the Quarkus and Spring
+# bundle artifacts can contain no code at all.
+io.github.jtsirogiannos.sftp.client.provider.mina.MinaSftpProvider

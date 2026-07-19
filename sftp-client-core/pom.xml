@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xmlns="http://maven.apache.org/POM/4.0.0"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.github.jtsirogiannos</groupId>
+        <artifactId>sftp-client-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>sftp-client-core</artifactId>
+    <name>SFTP Client :: Core</name>
+    <description>
+        Session pool, SftpClients bootstrap, InputStreamPublisher and the facade implementations.
+        Depends on the API only - never on a provider.
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>sftp-client-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+
+        <!-- Binds SLF4J to java.util.logging for tests only, so LoggingTest can capture records.
+             Nothing is bound at runtime: choosing a backend stays the application's job. -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-jdk14</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+          reactive-streams TCK, test scope only: proves InputStreamPublisher obeys the spec.
+
+          This module is deliberately TestNG-only, unlike every other module here. The reactive
+          streams TCK is built on TestNG and drags it in transitively; with junit-jupiter also on
+          the test classpath Surefire picks ONE provider and silently ignores the other framework's
+          tests. A TCK that quietly never runs is worse than no TCK, so JUnit stays out of core.
+          Provider modules keep JUnit 5 - they don't see this classpath.
+        -->
+        <dependency>
+            <groupId>org.reactivestreams</groupId>
+            <artifactId>reactive-streams-tck-flow</artifactId>
+            <version>${reactive-streams.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

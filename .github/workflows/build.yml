@@ -1,0 +1,59 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: [ 17, 21 ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+      - run: ./mvnw -B verify
+
+  # The TCK is the point of the SPI, so run it explicitly per provider rather than
+  # letting a single aggregate build hide which backend failed.
+  tck:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [ jsch, mina ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+      - run: ./mvnw -B -pl sftp-provider-${{ matrix.provider }} -am test
+
+  native:
+    runs-on: ubuntu-latest
+    # No provider matrix: the integration-tests application declares the mina bundle, so running it
+    # twice would build the same binary twice. Parameterising the bundle is the way to cover jsch
+    # here, and that is not wired up yet.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: graalvm-community
+          # 25 to match the jdk-25 Mandrel builder image Quarkus 3.33 selects for container builds.
+          # 21 may well work - Quarkus still lists GraalVM 23.1/JDK 21 - but there is no reason to
+          # run native on an older JDK than the one Quarkus itself defaults to.
+          java-version: 25
+          cache: maven
+      # native-image comes from the graalvm-community distribution above, so this builds locally on
+      # the runner. Without a local GraalVM, add -Dquarkus.native.container-build=true to build the
+      # binary inside a container instead.
+      - run: ./mvnw -B verify -Pnative -pl quarkus-sftp-client/integration-tests -am

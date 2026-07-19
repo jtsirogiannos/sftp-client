@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.github.jtsirogiannos</groupId>
+        <artifactId>sftp-client-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>sftp-client-spring-boot-starter</artifactId>
+    <name>SFTP Client :: Spring Boot Starter</name>
+    <description>
+        Starter for a servlet (Spring MVC) application. Brings the auto-configuration and nothing
+        else - no Reactor, no reactive runtime.
+    </description>
+
+    <!--
+      A dependency aggregator with no code of its own, which is what a starter is: Spring Boot's own
+      starters carry dependencies while the auto-configuration lives in a separate artifact. The
+      reactive variant is sftp-client-spring-boot-starter-reactive.
+
+      Nothing here drags Reactor onto a servlet application's classpath. That matters: a plain
+      spring-boot-starter-web application has neither reactor-core nor reactive-streams, and the
+      neutral ReactiveSftpClient works there anyway because it speaks CompletionStage and
+      Flow.Publisher - both JDK types. Spring MVC handles a CompletionStage return value natively,
+      so async controllers need nothing added.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>sftp-client-spring-boot-autoconfigure</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
+</project>

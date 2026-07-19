@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.github.jtsirogiannos</groupId>
+        <artifactId>sftp-client-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>quarkus-sftp-client-parent</artifactId>
+    <packaging>pom</packaging>
+    <name>Quarkus SFTP Client :: Parent</name>
+    <description>
+        Quarkus extension. Packages stay io.quarkiverse.* on purpose - that is where these artifacts
+        land after donation, and renaming them later would break every consumer.
+    </description>
+
+    <modules>
+        <module>runtime</module>
+        <module>deployment</module>
+        <module>jsch</module>
+        <module>mina</module>
+        <!-- Last: it consumes the bundles above as an application would. -->
+        <module>integration-tests</module>
+    </modules>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-bom</artifactId>
+                <version>${quarkus.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <!--
+              Managed, not applied. Only the integration-tests module is an application that needs
+              augmenting; declaring this in <plugins> would attach it to the runtime and deployment
+              modules too, which are libraries.
+            -->
+            <plugins>
+                <plugin>
+                    <groupId>io.quarkus</groupId>
+                    <artifactId>quarkus-maven-plugin</artifactId>
+                    <version>${quarkus.version}</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+</project>
