@@ -47,7 +47,7 @@ application there serves blocking and reactive endpoints together.
 | Module | What it is | Deps |
 |---|---|---|
 | `sftp-client-bom` | dependency management for consumers | — |
-| `sftp-client-api` | `SftpProvider`, `SftpSession`, `SftpCapabilities`, both client facades | **none** |
+| `sftp-client-api` | `SftpProvider`/`SftpSession` and their optional async siblings, `SftpCapabilities`, both client facades | **none** |
 | `sftp-client-core` | `BoundedSftpSessionPool`, `SftpClients` bootstrap, `InputStreamPublisher`, facade impls | api + slf4j-api |
 | `sftp-provider-jsch` | JSch backend (SFTP v3, stop-and-wait) | api + jsch |
 | `sftp-provider-mina` | MINA SSHD backend (SFTP v6 where the server agrees, pipelined) | api + sshd |
@@ -82,6 +82,33 @@ client.list("/inbound", f -> f.name().endsWith(".csv"));
 client.deleteRecursively("/outbound/2026/06");   // symlinks removed, never followed
 ```
 
+**Publishing a file nobody can read half of.** `upload` writes straight to the destination, so a
+consumer polling that directory can pick the file up a third written — the oldest bug in SFTP
+integration. `uploadAtomically` writes to a scratch name beside it and renames into place:
+
+```java
+client.uploadAtomically("/inbound/orders.csv", data);
+```
+
+Available on the reactive facade too. Replacing an existing file needs a rename that overwrites,
+which is SFTP v5+; against a v3 server the call throws rather than quietly doing
+remove-then-rename, because that gap is the window it exists to close. Writing to a path that does
+not exist yet is atomic everywhere. See [ADR 0004](docs/adr/0004-publish-by-rename.md).
+
+**One connection for a block of work.** Every call above borrows a session and returns it, which is
+right for one-off operations and wasteful for a sequence. `withSession` pins one:
+
+```java
+client.withSessionWithoutResult(work -> {          // withSession(...) if you need a return value
+    work.mkdirs("/outbound/2026/07");
+    work.uploadAtomically("/outbound/2026/07/report.csv", data);
+    work.rename("/outbound/2026/07/old.csv", "/archive/old.csv");
+});
+```
+
+The block gets the same `SftpOperations` surface, so nothing changes except how many times the pool
+is asked. A directory sync that took fourteen borrows takes one.
+
 Quarkus — add `quarkus-sftp-client-mina` (or `-jsch`) and inject:
 
 ```java
@@ -97,8 +124,9 @@ Spring Boot — pick the starter that matches your application type, then config
 | WebFlux | `sftp-client-spring-boot-starter-reactive` | the above plus `ReactorSftpClient` |
 
 ```java
-@Qualifier("sftpClient-bank-a")        SftpClient blocking;
-@Qualifier("reactorSftpClient-bank-a") ReactorSftpClient reactive;   // reactive starter only
+@Qualifier("sftpClient-bank-a")         SftpClient blocking;
+@Qualifier("reactiveSftpClient-bank-a") ReactiveSftpClient async;      // JDK types, both starters
+@Qualifier("reactorSftpClient-bank-a")  ReactorSftpClient reactive;    // reactive starter only
 ```
 
 One endpoint gets `@Default` (Quarkus) / primary (Spring) beans, so the common case needs no
@@ -178,6 +206,23 @@ had returned.
 "async": MINA's public client API has no zero-thread SFTP path, it just keeps requests in flight so
 the pulling worker rarely stalls. Callers are never told a transfer is more asynchronous than it is.
 
+**There is a real `asyncStreaming` flag, and today almost nothing sets it.** The SPI has an optional
+second half — `AsyncSftpSession` and `AsyncSftpProvider`, returning `CompletionStage` and
+`Flow.Publisher` — for a backend that can complete operations without parking a thread. When a
+provider implements it, `SftpClients.reactive` builds `AsyncReactiveSftpClient` over a pool typed to
+those sessions, and the choice is made once per client rather than re-tested per call.
+
+The two contracts are siblings, not subtypes: both extend a three-method `SftpSessionLifecycle`,
+which is all a pool ever touches, so one generic `BoundedSftpSessionPool<S>` serves both. A provider
+implements whichever it actually is.
+
+Only `sftp-provider-inmemory` sets `asyncStreaming` today, because **no JVM SSH library exposes a
+non-blocking SFTP client API** — MINA, SSHJ, JSch and Maverick are all an async transport with a
+blocking client on top. The mechanism for building one has been proved against MINA's channel API
+and the seam is written up, along with the coupling risk of relying on it:
+[ADR 0003](docs/adr/0003-async-spi-and-the-mina-seam.md). Until then the flag stays false for both
+network backends, which is the point of having it.
+
 **Capabilities exist at two levels, and the difference is not cosmetic.**
 `SftpProvider.capabilities()` is the backend's best case; `SftpSession.capabilities()` is what this
 server actually agreed to. The MINA provider negotiates v6 against MINA's own server and **v3 against
@@ -223,7 +268,6 @@ binary.
 - ~~Add `LICENSE`~~ — done: verbatim Apache 2.0, matching the root POM's `<licenses>` declaration.
   Still undecided: the copyright holder. There is no `NOTICE` file and no source headers, because
   naming an owner is your call (see the employment-agreement note below).
-- **This is not a git repository yet.** Nothing here is under version control.
 - Check your employment agreement's IP/moonlighting clause before going public.
 - Do **not** publish the `quarkus-sftp-client*` artifacts under your own groupId — see the
   Quarkiverse note in ROADMAP "Publishing order".
@@ -244,4 +288,6 @@ binary.
 - No retry or backoff on transient failures, no metrics, no health checks. Observability
   (Micrometer, OpenTelemetry) and Quarkus Dev Services are written up in [ROADMAP.md](ROADMAP.md)
   under "Backlog", each with the design question that has to be settled first.
-- The reactive facade has no equivalent of the `SftpClient` convenience methods.
+- The reactive facade has no equivalent of most `SftpClient` convenience methods — `mkdirs`,
+  `deleteRecursively`, `visit`, `findFirst` and the `Path` transfers are blocking-only.
+  `uploadAtomically` is the exception and exists on both.
