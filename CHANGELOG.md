@@ -38,6 +38,11 @@ Nothing has been published to Maven Central. The API is still free to change.
 
 ### Changed
 
+- Quarkus extension packages moved from `io.quarkiverse.sftp.client.*` to
+  `io.github.jtsirogiannos.sftp.client.quarkus.*`, and the extension now ships a
+  `quarkus-extension.yaml` descriptor.
+  See [ADR 0006](docs/adr/0006-own-namespace-and-one-repository.md).
+
 - `SftpSession` and `AsyncSftpSession` are siblings over `SftpSessionLifecycle`, and
   `SftpSessionPool` is generic in the session type.
   See [ADR 0002](docs/adr/0002-sibling-session-contracts.md).

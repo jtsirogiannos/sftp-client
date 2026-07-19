@@ -19,3 +19,4 @@ shipped.
 | [0003](0003-async-spi-and-the-mina-seam.md) | Ship the async SPI without an async network provider; the MINA seam that would build one |
 | [0004](0004-publish-by-rename.md) | `uploadAtomically` publishes by rename, and refuses rather than degrading on SFTP v3 |
 | [0005](0005-test-server-binds-below-ephemeral-range.md) | The embedded test server binds to loopback below the ephemeral port range |
+| [0006](0006-own-namespace-and-one-repository.md) | Publish every module under one namespace from one repository; drop the Quarkiverse namespace |

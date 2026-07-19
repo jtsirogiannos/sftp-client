@@ -113,8 +113,8 @@ parameterised run.
 
 Now the extension is a thin adapter, not the product.
 
-- Repo `quarkus-sftp-client`, coordinates `io.quarkiverse.sftp:*`, standard `runtime` + `deployment`
-  + `integration-tests` layout (Quarkiverse has a extension template/archetype — start from it).
+- Lives in this repository under `quarkus-sftp-client/`, coordinates `io.github.jtsirogiannos:*`,
+  standard `runtime` + `deployment` + `integration-tests` layout.
 - `runtime`: the `@ConfigMapping` named-endpoint config and `@NamedSftp` qualifier already drafted,
   plus a recorder producing clients; and the Mutiny edge adapter wrapping the core's `Publisher`.
 - `deployment`: synthetic beans per named endpoint, build-time provider resolution (fail the *build*,
@@ -185,22 +185,25 @@ The library modules share a version because a TCK change can force provider chan
 releasable in one shot. The extension does not: it needs to release when Quarkus 3.x+1 lands, and
 forcing a library release for that is backwards.
 
-**But start with everything in one repo anyway.** Until the SPI stabilises (end of Phase 2), split
-repos mean every SPI tweak is a local `SNAPSHOT` install plus version juggling across three builds.
-Keep it all together while the contract is moving; split at 1.0 when it stops moving.
+**Decided: one repo, one version, one groupId — indefinitely.** The Quarkus extension and the Spring
+starters are treated as permanent parts of this project rather than as things staged for donation.
+Everything publishes under `io.github.jtsirogiannos`, and a release bumps every module together.
 
-The split is also partly forced: Quarkiverse is one-repo-per-extension, and they create the repo
-(settings are Terraform-managed infra-as-code), so the extension can't stay in your monorepo if you
-donate it.
+The cost is real and worth stating: a Spring-only fix bumps the version of the core too. That is the
+monorepo trade, and it is the same one Spring Boot itself makes. What it buys is that an SPI change
+never needs SNAPSHOT juggling across three builds, and the framework modules cannot quietly rot
+against a core that moved without them.
+
+A future split is not ruled out — Quarkiverse is one-repo-per-extension, so donating the extension
+would force one — but it is a contingency rather than a plan, and nothing is now designed around it.
 
 ## Publishing order
 
-**Library to Maven Central first — this is a hard dependency, not a preference.** The Quarkiverse
-release job runs `mvn release:prepare release:perform` on their CI. Your extension POM depends on
-your library, so if the library isn't resolvable from Central, their build fails. You cannot release
-a Quarkiverse extension that depends on a SNAPSHOT or a locally-installed artifact.
+One reactor, one version, one coordinate space, so there is no ordering problem to solve: a tagged
+release publishes every module to Maven Central under `io.github.jtsirogiannos` in a single pass.
 
-Order: **library on Central → request Quarkiverse repo → extension release.**
+Moving the repository into a GitHub organisation later needs nothing from the build. A transfer
+preserves history, issues and Actions; only `<scm>`, `<url>` and any badge links change.
 
 ### Maven Central setup (verify against current docs — this changed, and older guides are wrong)
 
@@ -237,11 +240,12 @@ You don't transfer your repo — you request one and move the code in.
   code.quarkus.io, and registering with `quarkus-ecosystem-ci` for cross-testing against Quarkus
   snapshots.
 
-> **Don't publish the extension to Central under your own groupId first.** Quarkiverse will publish
-> it as `io.quarkiverse.*`, and a groupId change is a breaking change for every early adopter. Let the
-> first *public* release of the extension be the Quarkiverse one; use SNAPSHOTs locally until then.
-> This constraint applies only to the extension — the library stays yours under your own groupId
-> forever, since Quarkiverse only takes the extension.
+> **This section is a contingency, not the plan.** The extension now ships under
+> `io.github.jtsirogiannos` in this repository, with packages to match — see
+> [ADR 0006](docs/adr/0006-own-namespace-and-one-repository.md). If donation ever happens it forces a
+> groupId change to `io.quarkiverse.<repo-name>`, which is breaking for anyone already depending on
+> it; that break is the price of donating, and it is why the decision to donate has to be made before
+> the extension has adopters rather than after.
 
 ### Spring side
 

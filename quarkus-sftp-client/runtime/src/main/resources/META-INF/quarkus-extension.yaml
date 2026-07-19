@@ -1,0 +1,18 @@
+name: SFTP Client
+artifact: io.github.jtsirogiannos:quarkus-sftp-client
+description: Framework-agnostic SFTP client with pluggable JSch and Apache MINA SSHD backends,
+  exposed as blocking, reactive and Mutiny clients per configured endpoint.
+metadata:
+  keywords:
+    - sftp
+    - ssh
+    - file-transfer
+    - jsch
+    - mina
+  categories:
+    - "data"
+  guide: https://github.com/jtsirogiannos/sftp-client
+  status: experimental
+  # A provider bundle must be added alongside this extension, the way a JDBC driver is:
+  # quarkus-sftp-client-mina or quarkus-sftp-client-jsch.
+  unlisted: false

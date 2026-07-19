@@ -269,8 +269,8 @@ binary.
   Still undecided: the copyright holder. There is no `NOTICE` file and no source headers, because
   naming an owner is your call (see the employment-agreement note below).
 - Check your employment agreement's IP/moonlighting clause before going public.
-- Do **not** publish the `quarkus-sftp-client*` artifacts under your own groupId — see the
-  Quarkiverse note in ROADMAP "Publishing order".
+- The Quarkus extension and Spring starters publish under `io.github.jtsirogiannos` alongside the
+  library, on one version — see [ADR 0006](docs/adr/0006-own-namespace-and-one-repository.md).
 
 ## Project documents
 

@@ -12,8 +12,15 @@
     <packaging>pom</packaging>
     <name>Quarkus SFTP Client :: Parent</name>
     <description>
-        Quarkus extension. Packages stay io.quarkiverse.* on purpose - that is where these artifacts
-        land after donation, and renaming them later would break every consumer.
+        Quarkus extension, published under this project's own coordinates and namespace.
+
+        Packages were once io.quarkiverse.* in anticipation of donating the extension to Quarkiverse,
+        on the reasoning that renaming after release would break every consumer. That was a bet on a
+        donation that is no longer planned, and shipping classes in a namespace we do not own is the
+        worse end of the trade: it invites a split package if Quarkiverse ever publishes its own
+        io.quarkiverse.sftp.*, and it tells users this is an official Quarkiverse extension. Donating
+        later would force a groupId change to io.quarkiverse.&lt;repo&gt; anyway, so the rename would
+        ride along with a break that is happening regardless.
     </description>
 
     <modules>
