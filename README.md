@@ -56,6 +56,7 @@ Artifact ids, which is what you depend on. On disk the framework adapters live u
 | `sftp-provider-mina` | MINA SSHD backend (SFTP v6 where the server agrees, pipelined) | api + sshd |
 | `sftp-provider-inmemory` | in-memory backend for tests: no server, no network, no Docker | api |
 | `sftp-client-tck` | conformance suite + both server fixtures | api + sshd, testcontainers *(optional)* |
+| `sftp-client-micrometer` | Micrometer decorator: operation timers, transfer counters, pool gauges | core + micrometer |
 | `sftp-client-kotlin` | `SuspendingSftpClient`: suspend functions and kotlinx `Flow` | api + coroutines |
 | `sftp-client-integration-tests` | facades × real providers × real server. Not published | everything |
 | `quarkus-sftp-client` | `@ConfigMapping`, `@NamedSftp`, `MutinySftpClient` adapter | core + mutiny |
@@ -294,9 +295,9 @@ binary.
 - MINA's `JceRandom$Cache` needs run-time initialisation for native image, and that registration sits
   in the provider-neutral extension behind a class check rather than in the mina bundle, which is
   meant to be code-free. `quarkus-sshd` targets the server side and does not cover it.
-- No retry or backoff on transient failures, no metrics, no health checks. Observability
-  (Micrometer, OpenTelemetry) and Quarkus Dev Services are written up in [ROADMAP.md](ROADMAP.md)
-  under "Backlog", each with the design question that has to be settled first.
+- No retry or backoff on transient failures, and no health checks. Micrometer metrics exist
+  (`sftp-client-micrometer`); OpenTelemetry tracing does not yet. Quarkus Dev Services is written up
+  in [ROADMAP.md](ROADMAP.md) under "Backlog" with the design question that has to be settled first.
 - The reactive facade still lacks `visit` and the `java.nio.file.Path` transfers. `visit` needs a
   streaming listing to be worth having (its blocking form stops the walk early, which
   `CompletionStage<List<..>>` cannot express), and `Path` transfers would put blocking file I/O

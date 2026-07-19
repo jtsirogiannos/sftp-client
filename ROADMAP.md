@@ -262,10 +262,21 @@ most of these the question is the hard part and the code is not.
 
 ### Observability: Micrometer and OpenTelemetry
 
-Today the only signal is SLF4J. Worth having: per-operation timers, transfer byte counters, and pool
-gauges — live, idle, borrow-wait, discards, evictions. `BoundedSftpSessionPool` already exposes
-`liveSessions()` and `idleSessions()`; the client does not currently expose its pool, which is the
-one small change the metrics binder would need.
+**Micrometer is done** — `sftp-client-micrometer`, a decorator over `SftpClient` giving
+`sftp.client.operations` timers (tagged operation and outcome) and `sftp.client.transferred` byte
+counters, plus `SftpPoolMetrics` binding live and idle gauges.
+
+Two things the implementation settled. The client never had to expose its pool after all: gauges bind
+to a `BoundedSftpSessionPool` directly, which is more honest anyway since several clients can share
+one pool and the gauges should be registered once. And `withSession` turned out to be the case that
+mattered — it hands the block a session-bound `SftpOperations` that bypasses the decorator entirely,
+so a unit of work, which is precisely where multi-step traffic lives, would have been a blind spot.
+The operations passed to the block are wrapped with the same instrumentation.
+
+Still open: borrow-wait, discard and eviction counters, which need the pool to report events rather
+than just state; and the reactive facade, which the decorator does not yet cover.
+
+**OpenTelemetry is still to do.**
 
 **Decorators, not instrumentation in the core.** Extracting `SftpOperations` made this cheap: a
 metering or tracing decorator implements that interface, wraps another, and the core never learns
