@@ -56,8 +56,8 @@ Artifact ids, which is what you depend on. On disk the framework adapters live u
 | `sftp-provider-mina` | MINA SSHD backend (SFTP v6 where the server agrees, pipelined) | api + sshd |
 | `sftp-provider-inmemory` | in-memory backend for tests: no server, no network, no Docker | api |
 | `sftp-client-tck` | conformance suite + both server fixtures | api + sshd, testcontainers *(optional)* |
-| `sftp-client-micrometer` | Micrometer decorator: operation timers, transfer counters, pool gauges | core + micrometer |
-| `sftp-client-opentelemetry` | OpenTelemetry decorator: a CLIENT span per operation, nested under a unit of work | core + otel-api |
+| `sftp-client-micrometer` | Micrometer decorator for both facades: timers, transfer counters, pool gauges | core + micrometer |
+| `sftp-client-opentelemetry` | OpenTelemetry decorator for both facades: a CLIENT span per operation | core + otel-api |
 | `sftp-client-kotlin` | `SuspendingSftpClient`: suspend functions and kotlinx `Flow` | api + coroutines |
 | `sftp-client-integration-tests` | facades × real providers × real server. Not published | everything |
 | `quarkus-sftp-client` | `@ConfigMapping`, `@NamedSftp`, `MutinySftpClient` adapter | core + mutiny |
@@ -296,11 +296,11 @@ binary.
 - MINA's `JceRandom$Cache` needs run-time initialisation for native image, and that registration sits
   in the provider-neutral extension behind a class check rather than in the mina bundle, which is
   meant to be code-free. `quarkus-sshd` targets the server side and does not cover it.
-- No retry or backoff on transient failures, and no health checks. Metrics and tracing exist
-  (`sftp-client-micrometer`, `sftp-client-opentelemetry`), neither covers the reactive facade yet,
-  and the tracing module's file attributes are experimental because **no OpenTelemetry semantic
-  convention for file transfer exists** — see its `SftpAttributes`. Quarkus Dev Services is written
-  up in [ROADMAP.md](ROADMAP.md) under "Backlog" with the design question to settle first.
+- No retry or backoff on transient failures, and no health checks. Metrics and tracing cover both
+  facades (`sftp-client-micrometer`, `sftp-client-opentelemetry`), but the tracing module's file
+  attributes are experimental because **no OpenTelemetry semantic convention for file transfer
+  exists** — see its `SftpAttributes`. Quarkus Dev Services is written up in
+  [ROADMAP.md](ROADMAP.md) under "Backlog" with the design question to settle first.
 - The reactive facade still lacks `visit` and the `java.nio.file.Path` transfers. `visit` needs a
   streaming listing to be worth having (its blocking form stops the walk early, which
   `CompletionStage<List<..>>` cannot express), and `Path` transfers would put blocking file I/O

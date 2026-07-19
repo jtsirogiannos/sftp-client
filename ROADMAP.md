@@ -293,7 +293,20 @@ Note the deliberate asymmetry with the metrics module: tracing aggregates compos
 span because that is what makes a unit of work legible, where metrics deliberately do not, because a
 counter should reflect what crossed the wire. Same data, two different useful questions.
 
-Still open for both modules: the reactive facade.
+**Both facades are covered.** The reactive decorators sit on a `ForwardingReactiveSftpClient` base
+in the core, alongside a shared `ByteCountingPublisher` so metrics and tracing count transferred
+bytes the same way.
+
+The hazard there is worth recording because it is silent: a reactive operation returns a
+`CompletionStage` immediately and finishes later, so measuring around the method call times the
+construction of a stage and reports near zero — a metric that looks healthy precisely because it
+measures nothing, and a span exported before its operation has run. Timers stop and spans end in
+completion callbacks; a download is measured across its subscription, since a publisher nobody
+subscribes to has transferred nothing. Both properties have tests that fail against the naive
+implementation.
+
+Still open: borrow-wait, discard and eviction counters, which need the pool to report events rather
+than just state.
 
 **Decorators, not instrumentation in the core.** Extracting `SftpOperations` made this cheap: a
 metering or tracing decorator implements that interface, wraps another, and the core never learns
