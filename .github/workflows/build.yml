@@ -45,15 +45,20 @@ jobs:
     # here, and that is not wired up yet.
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      # graalvm/setup-graalvm rather than actions/setup-java: "graalvm-community" is not a valid
+      # distribution for setup-java@v4 (it only lands in v5), and setup-java's "graalvm" means the
+      # Oracle build under the GFTC licence, which is not what we want. This action is the GraalVM
+      # team's own and puts native-image on PATH, so no `gu install` step is needed.
+      - uses: graalvm/setup-graalvm@v1
         with:
           distribution: graalvm-community
-          # 25 to match the jdk-25 Mandrel builder image Quarkus 3.33 selects for container builds.
-          # 21 may well work - Quarkus still lists GraalVM 23.1/JDK 21 - but there is no reason to
-          # run native on an older JDK than the one Quarkus itself defaults to.
-          java-version: 25
+          # 25 matches the jdk-25 Mandrel builder image Quarkus 3.33 selects for container builds
+          # (quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-25), so the runner build and the
+          # container build target the same JDK. Switching to distribution: mandrel would match
+          # Quarkus upstream CI even more closely, and is the first thing to try if this drifts.
+          java-version: '25'
+          # Avoids GitHub API rate-limiting when resolving the release to download.
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           cache: maven
-      # native-image comes from the graalvm-community distribution above, so this builds locally on
-      # the runner. Without a local GraalVM, add -Dquarkus.native.container-build=true to build the
-      # binary inside a container instead.
+      - run: native-image --version
       - run: ./mvnw -B verify -Pnative -pl quarkus-sftp-client/integration-tests -am
