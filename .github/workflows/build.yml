@@ -61,4 +61,4 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache: maven
       - run: native-image --version
-      - run: ./mvnw -B verify -Pnative -pl quarkus-sftp-client/integration-tests -am
+      - run: ./mvnw -B verify -Pnative -pl integrations/quarkus/integration-tests -am

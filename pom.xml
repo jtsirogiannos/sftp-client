@@ -71,10 +71,10 @@
     <!-- Last: it consumes core and both providers, as an application would. -->
     <module>sftp-client-kotlin</module>
     <module>sftp-client-integration-tests</module>
-    <module>quarkus-sftp-client</module>
-    <module>sftp-client-spring-boot-autoconfigure</module>
-    <module>sftp-client-spring-boot-starter</module>
-    <module>sftp-client-spring-boot-starter-reactive</module>
+    <module>integrations/quarkus</module>
+    <module>integrations/spring/autoconfigure</module>
+    <module>integrations/spring/starter</module>
+    <module>integrations/spring/starter-reactive</module>
   </modules>
 
   <dependencyManagement>

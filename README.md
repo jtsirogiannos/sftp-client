@@ -44,7 +44,10 @@ application there serves blocking and reactive endpoints together.
 
 ## Modules
 
-| Module | What it is | Deps |
+Artifact ids, which is what you depend on. On disk the framework adapters live under
+`integrations/quarkus/` and `integrations/spring/`; everything else is a directory at the root.
+
+| Artifact | What it is | Deps |
 |---|---|---|
 | `sftp-client-bom` | dependency management for consumers | — |
 | `sftp-client-api` | `SftpProvider`/`SftpSession` and their optional async siblings, `SftpCapabilities`, both client facades | **none** |
@@ -55,10 +58,10 @@ application there serves blocking and reactive endpoints together.
 | `sftp-client-tck` | conformance suite + both server fixtures | api + sshd, testcontainers *(optional)* |
 | `sftp-client-kotlin` | `SuspendingSftpClient`: suspend functions and kotlinx `Flow` | api + coroutines |
 | `sftp-client-integration-tests` | facades × real providers × real server. Not published | everything |
-| `quarkus-sftp-client/runtime` | `@ConfigMapping`, `@NamedSftp`, `MutinySftpClient` adapter | core + mutiny |
-| `quarkus-sftp-client/deployment` | build steps, synthetic beans per endpoint | runtime |
-| `quarkus-sftp-client/{jsch,mina}` | code-free BYO-driver bundles | + quarkus-jsch / quarkus-sshd |
-| `quarkus-sftp-client/integration-tests` | a real Quarkus app, JVM and native. Not published | bundle + quarkus-rest |
+| `quarkus-sftp-client` | `@ConfigMapping`, `@NamedSftp`, `MutinySftpClient` adapter | core + mutiny |
+| `quarkus-sftp-client-deployment` | build steps, synthetic beans per endpoint | runtime |
+| `quarkus-sftp-client-{jsch,mina}` | code-free BYO-driver bundles | + quarkus-jsch / quarkus-sshd |
+| `quarkus-sftp-client-integration-tests` | a real Quarkus app, JVM and native. Not published | bundle + quarkus-rest |
 | `sftp-client-spring-boot-autoconfigure` | `@AutoConfiguration`, `@ConfigurationProperties`, the registrar | core + spring |
 | `sftp-client-spring-boot-starter` | aggregator for servlet apps. No code, **no Reactor** | autoconfigure |
 | `sftp-client-spring-boot-starter-reactive` | aggregator for WebFlux + `ReactorSftpClient` | autoconfigure + reactor |

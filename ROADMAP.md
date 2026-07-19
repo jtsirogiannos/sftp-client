@@ -113,7 +113,7 @@ parameterised run.
 
 Now the extension is a thin adapter, not the product.
 
-- Lives in this repository under `quarkus-sftp-client/`, coordinates `io.github.jtsirogiannos:*`,
+- Lives in this repository under `integrations/quarkus/`, coordinates `io.github.jtsirogiannos:*`,
   standard `runtime` + `deployment` + `integration-tests` layout.
 - `runtime`: the `@ConfigMapping` named-endpoint config and `@NamedSftp` qualifier already drafted,
   plus a recorder producing clients; and the Mutiny edge adapter wrapping the core's `Publisher`.
