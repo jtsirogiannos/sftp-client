@@ -85,6 +85,34 @@ public record SftpConnectionConfig(
     }
 
     /**
+     * Encodes a secret to UTF-8 bytes without an intermediate {@link String}.
+     *
+     * <p>{@code new String(chars).getBytes()} would be shorter and wrong: the String copy is
+     * immortal until GC and defeats every {@code wipe} call around it, which is the whole reason
+     * this record holds secrets as {@code char[]}. The encoder's scratch buffer is wiped here; the
+     * caller owns wiping the returned array and the input.
+     *
+     * @return a UTF-8 encoding the caller must {@link #wipe(byte[])} after use
+     */
+    public static byte[] encodeSecret(char[] secret) {
+        java.nio.ByteBuffer encoded = java.nio.charset.StandardCharsets.UTF_8
+            .encode(java.nio.CharBuffer.wrap(secret));
+        byte[] bytes = new byte[encoded.remaining()];
+        encoded.get(bytes);
+        if (encoded.hasArray()) {
+            java.util.Arrays.fill(encoded.array(), (byte) 0);
+        }
+        return bytes;
+    }
+
+    /** Best-effort wipe; the byte twin of {@link #wipe(char[])}. */
+    public static void wipe(byte[] secret) {
+        if (secret != null) {
+            java.util.Arrays.fill(secret, (byte) 0);
+        }
+    }
+
+    /**
      * Best-effort wipe of a secret array. Overwrites in place; safe with null.
      */
     public static void wipe(char[] secret) {

@@ -17,7 +17,6 @@ import com.jcraft.jsch.UserInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
 /**
@@ -136,7 +135,14 @@ public final class JschSftpProvider implements SftpProvider {
             if (passphrase == null) {
                 jsch.addIdentity(privateKey.toString());
             } else {
-                jsch.addIdentity(privateKey.toString(), new String(passphrase));
+                // The byte[] overload, encoded without an intermediate String — a String copy is
+                // immortal until GC and would defeat the wipes below.
+                byte[] encoded = SftpConnectionConfig.encodeSecret(passphrase);
+                try {
+                    jsch.addIdentity(privateKey.toString(), encoded);
+                } finally {
+                    SftpConnectionConfig.wipe(encoded);
+                }
             }
         } finally {
             SftpConnectionConfig.wipe(passphrase);
@@ -149,9 +155,15 @@ public final class JschSftpProvider implements SftpProvider {
             return;
         }
         try {
-            // setPassword(byte[]) rather than setPassword(String): JSch keeps the array and we can
-            // wipe our copy, where a String would linger in the heap until GC.
-            session.setPassword(new String(password).getBytes(StandardCharsets.UTF_8));
+            // setPassword(byte[]) via a String-free encoding: the previous version built the byte
+            // array through new String(password), creating exactly the immortal heap copy this
+            // comment claimed to avoid. JSch copies the array, so ours is safe to wipe.
+            byte[] encoded = SftpConnectionConfig.encodeSecret(password);
+            try {
+                session.setPassword(encoded);
+            } finally {
+                SftpConnectionConfig.wipe(encoded);
+            }
         } finally {
             SftpConnectionConfig.wipe(password);
         }
