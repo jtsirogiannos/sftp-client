@@ -65,6 +65,21 @@ public class ReactiveAtomicUploadFailureTest {
         assertTrue(removed.endsWith(".part"), "unexpected scratch path: " + removed);
     }
 
+    /**
+     * An invalid path must fail the returned stage, never throw from the method: a caller composing
+     * stages has no way to catch a synchronous throw. This is the interface's own rule, and the
+     * first version of this default method broke it for exactly this input.
+     */
+    @Test
+    public void anInvalidPathFailsTheStageRatherThanThrowing() {
+        StubReactiveClient client = new StubReactiveClient();
+
+        CompletionStage<Void> stage = client.uploadAtomically("/upload/dir/", empty());
+
+        assertTrue(stage.toCompletableFuture().isCompletedExceptionally(),
+            "a directory path is an invalid destination and must surface through the stage");
+    }
+
     private static Flow.Publisher<ByteBuffer> empty() {
         return subscriber -> subscriber.onSubscribe(new Flow.Subscription() {
             @Override

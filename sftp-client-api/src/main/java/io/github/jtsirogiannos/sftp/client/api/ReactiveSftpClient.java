@@ -112,7 +112,15 @@ public interface ReactiveSftpClient extends AutoCloseable {
      */
     default CompletionStage<Void> uploadAtomically(String remotePath,
             Flow.Publisher<ByteBuffer> data) {
-        String temporary = AtomicPublish.temporaryPathFor(remotePath);
+        // Even the argument check fails the stage rather than throwing: a caller composing stages
+        // has no way to catch a synchronous throw, which is this interface's own stated rule —
+        // and the reason deleteRecursively's root refusal is a failedFuture too.
+        String temporary;
+        try {
+            temporary = AtomicPublish.temporaryPathFor(remotePath);
+        } catch (RuntimeException invalidPath) {
+            return CompletableFuture.failedFuture(invalidPath);
+        }
         return exists(remotePath).thenCompose(present -> {
             if (present && !capabilities().posixRename()) {
                 return CompletableFuture.<Void>failedFuture(
