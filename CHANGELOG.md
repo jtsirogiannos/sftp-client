@@ -38,6 +38,16 @@ Nothing has been published to Maven Central. The API is still free to change.
 
 ### Changed
 
+- `SftpConnectionConfig` is a builder-only class rather than a public record, so new fields stop
+  being breaking changes; timeouts and passphrase-without-key are now validated.
+- `RemoteFile` reports numeric `ownerId`/`groupId` where the server supplies them.
+- The reactive facade gained `WriteMode` uploads and offset downloads; the Kotlin, Mutiny and
+  Reactor wrappers are at full parity, each guarded by a reflection tripwire.
+- Pool tuning (`max-size`, `max-idle`, `acquire-timeout`) is reachable from `SftpClients`, Spring
+  properties and Quarkus config; `PoolSettings` carries it.
+- OpenTelemetry spans accept a path redactor; the BOM covers the observability modules; builds are
+  reproducible and dependency convergence is enforced.
+
 - Quarkus extension packages moved from `io.quarkiverse.sftp.client.*` to
   `io.github.jtsirogiannos.sftp.client.quarkus.*`, and the extension now ships a
   `quarkus-extension.yaml` descriptor.
@@ -48,6 +58,20 @@ Nothing has been published to Maven Central. The API is still free to change.
   See [ADR 0002](docs/adr/0002-sibling-session-contracts.md).
 
 ### Fixed
+
+- `ByteArrayPublisher` (in-memory provider) delivered nested `onNext` signals and could overflow the
+  stack under a request-one-at-a-time subscriber; its drain loop is now serialised by a
+  work-in-progress counter.
+- `BoundedSftpSessionPool` invoked listeners while holding the pool lock on the timeout and
+  interrupt paths — a lock-order deadlock risk on exactly the exhaustion path where listeners alert.
+- The JSch provider routed passwords and passphrases through an intermediate `String`, defeating the
+  `char[]` wipe discipline its own comment claimed; credentials are now encoded via
+  `SftpConnectionConfig.encodeSecret`.
+- Reactive `uploadAtomically` threw synchronously for an invalid path instead of failing the stage.
+- MINA sessions on SFTP v6 reported files as owned by uid 0; ownership is now `UNKNOWN_ID` where the
+  wire carries names rather than numeric ids.
+- `WriteSubscriber` could leave an upstream producer requested-from but never cancelled when a
+  cancellation raced `onSubscribe`.
 
 - `WriteSubscriber` raced on chained writes, truncating uploads while reporting success.
 - `InputStreamPublisher` violated Reactive Streams rule 1.3 when a subscriber requested from inside
