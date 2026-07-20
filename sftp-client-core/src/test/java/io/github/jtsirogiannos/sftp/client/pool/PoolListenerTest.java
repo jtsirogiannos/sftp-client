@@ -158,6 +158,69 @@ public class PoolListenerTest {
         }
     }
 
+    /**
+     * The deadlock the contract exists to prevent. The timeout listener takes a lock of its own; a
+     * second thread holds that lock and calls into the pool. If the pool notified while holding its
+     * internal lock, the two would deadlock — a lock-order inversion on the exhaustion path, where
+     * listeners are most likely to page someone.
+     */
+    @Test
+    public void timeoutListenersFireOutsideThePoolLock() throws Exception {
+        Object listenerLock = new Object();
+        CountDownLatch inListener = new CountDownLatch(1);
+        CountDownLatch poolTouched = new CountDownLatch(1);
+
+        try (BoundedSftpSessionPool<SftpSession> pool =
+                pool(1, LONG_IDLE, Duration.ofMillis(80))) {
+            pool.addListener(new SftpSessionPoolListener() {
+                @Override
+                public void borrowTimedOut() {
+                    inListener.countDown();
+                    synchronized (listenerLock) {
+                        // Reached only once the other thread has exited listenerLock — and that
+                        // thread first calls into the pool. Deadlock if we hold the pool lock here.
+                    }
+                }
+            });
+            SftpSession held = pool.borrow();
+
+            ExecutorService other = Executors.newSingleThreadExecutor();
+            try {
+                other.submit(() -> {
+                    inListener.await();
+                    synchronized (listenerLock) {
+                        pool.liveSessions();   // takes the pool lock
+                        poolTouched.countDown();
+                    }
+                    return null;
+                });
+
+                // Runs the timeout path on this thread. Holding the pool lock through the listener
+                // would deadlock against the submit above, and the await below would expire.
+                ExecutorService borrower = Executors.newSingleThreadExecutor();
+                try {
+                    var timedOut = borrower.submit(() -> {
+                        try {
+                            pool.borrow();
+                            return false;
+                        } catch (SftpException expected) {
+                            return true;
+                        }
+                    });
+                    assertThat(poolTouched.await(5, TimeUnit.SECONDS))
+                        .describedAs("a listener holding the pool lock deadlocks this")
+                        .isTrue();
+                    assertThat(timedOut.get(5, TimeUnit.SECONDS)).isTrue();
+                } finally {
+                    borrower.shutdownNow();
+                }
+            } finally {
+                other.shutdownNow();
+            }
+            pool.recycle(held);
+        }
+    }
+
     // --- fixtures ---
 
     private static BoundedSftpSessionPool<SftpSession> pool(int maxSize, Duration maxIdle,

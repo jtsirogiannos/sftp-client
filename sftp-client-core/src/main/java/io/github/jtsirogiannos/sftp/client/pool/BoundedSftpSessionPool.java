@@ -172,6 +172,8 @@ public final class BoundedSftpSessionPool<S extends SftpSessionLifecycle>
             S pooled = null;
             boolean reservedSlot = false;
             List<S> expired = List.of();
+            SftpException failure = null;
+            boolean timedOut = false;
 
             lock.lock();
             try {
@@ -196,34 +198,49 @@ public final class BoundedSftpSessionPool<S extends SftpSessionLifecycle>
                                         + "that borrowed a session and never returned it.",
                                 config.username(), config.host(), config.port(), maxSize,
                                 Duration.ofNanos(acquireTimeoutNanos).toMillis());
-                        reportWait(waitStartedNanos);
-                        notifyListeners(SftpSessionPoolListener::borrowTimedOut);
-                        throw new SftpException("timed out after "
+                        // The throw happens OUTSIDE this locked region — see below. Notifying under
+                        // the lock is a lock-order inversion with any listener that takes a lock of
+                        // its own, on exactly the path (exhaustion) where listeners page people and
+                        // every other borrower is already queued behind this lock.
+                        failure = new SftpException("timed out after "
                                 + Duration.ofNanos(acquireTimeoutNanos).toMillis()
                                 + "ms waiting for a session; all " + maxSize
                                 + " are in use. Raise maxSize, or look for an operation that "
                                 + "borrowed a session and never returned it.");
+                        timedOut = true;
+                    } else {
+                        try {
+                            slotFreed.awaitNanos(remaining);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            failure = new SftpException("interrupted while waiting for a session", e);
+                        }
+                        if (failure == null) {
+                            continue;
+                        }
                     }
-                    try {
-                        slotFreed.awaitNanos(remaining);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        reportWait(waitStartedNanos);
-                        throw new SftpException("interrupted while waiting for a session", e);
-                    }
-                    continue;
                 }
             } finally {
                 lock.unlock();
             }
 
-            // Closing happens outside the lock: it can block, and no one else needs to wait for it.
+            // Closing happens outside the lock: it can block, and no one else needs to wait for
+            // it. Deliberately BEFORE the failure check: sessions already removed from idle in this
+            // iteration would otherwise never be closed when the borrow ends in a timeout.
             if (!expired.isEmpty()) {
                 log.debug("Evicting {} session(s) idle beyond {}ms", expired.size(),
                         Duration.ofNanos(maxIdleNanos).toMillis());
                 expired.forEach(session -> notifyListeners(SftpSessionPoolListener::sessionEvicted));
             }
             expired.forEach(BoundedSftpSessionPool::closeQuietly);
+
+            if (failure != null) {
+                reportWait(waitStartedNanos);
+                if (timedOut) {
+                    notifyListeners(SftpSessionPoolListener::borrowTimedOut);
+                }
+                throw failure;
+            }
 
             if (pooled != null) {
                 if (pooled.isValid()) {
