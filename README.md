@@ -4,7 +4,7 @@ Framework-agnostic SFTP client for the JVM, with pluggable **JSch** and **Apache
 backends — the JDBC "bring your own driver" model — plus a Quarkus extension and a Spring Boot
 starter built on top.
 
-> **Working, not released.** The whole reactor builds and 361 tests pass, including the conformance
+> **Working, not released.** The whole reactor builds and 419 tests pass, including the conformance
 > suite run against two independent SFTP servers. Versions in the root POM have been resolved and
 > build-tested. It has never been published, never run against a production server, never run in CI,
 > and the API is still free to change — see
@@ -85,7 +85,13 @@ client.mkdirs("/outbound/2026/07/18");           // mkdir -p
 client.upload(Path.of("report.csv"), "/outbound/2026/07/18/report.csv");
 client.list("/inbound", f -> f.name().endsWith(".csv"));
 client.deleteRecursively("/outbound/2026/06");   // symlinks removed, never followed
+client.chmod("/outbound/report.csv", 0640);
+client.findFirst("/inbound", f -> f.name().startsWith("SETTLE"));
 ```
+
+Attributes read back as well as write: `RemoteFile` carries `permissions`, and `ownerId`/`groupId`
+where the wire supplies them — numeric ids on SFTP v3, `UNKNOWN_ID` on v4+ servers that send owner
+*names* instead. Reporting a guess there would mean claiming every file belongs to root.
 
 **Publishing a file nobody can read half of.** `upload` writes straight to the destination, so a
 consumer polling that directory can pick the file up a third written — the oldest bug in SFTP
@@ -114,6 +120,23 @@ client.withSessionWithoutResult(work -> {          // withSession(...) if you ne
 The block gets the same `SftpOperations` surface, so nothing changes except how many times the pool
 is asked. A directory sync that took fourteen borrows takes one.
 
+**Sizing the pool, before production sizes it for you.** Every client owns a bounded pool: eight
+sessions, five minutes idle, thirty seconds to acquire. The ninth concurrent operation waits and
+then fails, which is a fine default and a poor surprise — so it is tunable at every entry point:
+
+```java
+PoolSettings pool = PoolSettings.defaults()
+        .withMaxSize(24)                              // concurrent operations per endpoint
+        .withAcquireTimeout(Duration.ofSeconds(5));   // fail fast rather than queue
+
+try (var client = SftpClients.blocking("mina", config, pool)) { ... }
+```
+
+The same three settings exist in both frameworks — `sftp.endpoints.bank-a.pool.max-size`,
+`.pool.max-idle`, `.pool.acquire-timeout` — and reach the same pool. If parked sessions keep dying
+before reuse, `max-idle` is longer than the server's own idle timeout; align it rather than raising
+`max-size`. `sftp-client-micrometer` exposes the gauges and counters that tell the two apart.
+
 Quarkus — add `quarkus-sftp-client-mina` (or `-jsch`) and inject:
 
 ```java
@@ -137,6 +160,22 @@ Spring Boot — pick the starter that matches your application type, then config
 One endpoint gets `@Default` (Quarkus) / primary (Spring) beans, so the common case needs no
 qualifier.
 
+**The reactive facade carries the same operations as the blocking one**, bar two documented
+exceptions (`visit`, and the `java.nio.file.Path` transfers). That includes the ones added late —
+`lstat`, `realpath`, `symlink`/`readlink`/`hardlink`, `setAttributes`, `statvfs`, `mkdirs`,
+`deleteRecursively`, `chmod`, filtered `list`, `findFirst`, `uploadAtomically` — plus explicit write
+semantics and resumable reads:
+
+```java
+client.upload("/inbound/log.txt", chunks, WriteMode.APPEND);
+client.download("/inbound/big.csv", resumeFrom);            // skip bytes already fetched
+```
+
+The Mutiny, Reactor and Kotlin wrappers mirror that surface. Each is hand-written, so each carries a
+test that fails the build if the neutral client grows an operation the wrapper lacks — they had
+silently drifted thirteen operations behind before those existed. Every wrapper also exposes the
+neutral client (`unwrap()`, or `underlying` in Kotlin) so a gap is never a wall.
+
 **The servlet starter pulls in no Reactor at all**, and it does not need to: `ReactiveSftpClient`
 speaks `CompletionStage` and `Flow.Publisher`, both JDK types, and Spring MVC returns a
 `CompletionStage` from a controller natively. Async endpoints work on a plain
@@ -147,15 +186,17 @@ same client — an endpoint keeps one connection pool however many facades you i
 > executor for its duration, because neither backend offers a zero-thread SFTP path — the same
 > reason the capability is called `pipelinedStreaming` and not "async". Nothing blocks the event
 > loop (the work is dispatched to that pool), but concurrent transfers are capped by the pool size,
-> eight by default, not by demand. Size it for the transfers you expect to overlap.
+> eight by default, not by demand — see `PoolSettings` above, or
+> `sftp.endpoints.<name>.pool.max-size`, and size it for the transfers you expect to overlap.
 
 Kotlin — add `sftp-client-kotlin` and wrap the reactive client:
 
 ```kotlin
 SuspendingSftpClient(SftpClients.reactive("mina", config, worker)).use { client ->
-    client.mkdir("/outbound/2026")
-    client.upload("/outbound/2026/report.csv", chunks)      // takes a kotlinx Flow
+    client.mkdirs("/outbound/2026/07")
+    client.uploadAtomically("/outbound/2026/07/report.csv", chunks)   // takes a kotlinx Flow
     client.download("/inbound/big.csv").collect { chunk -> ... }
+    client.deleteRecursively("/outbound/2026/06")
 }
 ```
 
@@ -197,6 +238,32 @@ otherwise an awkward thing to test against, since it means finding a v3 server.
 Logging is **SLF4J API only** — never an implementation. The pool logs an exhausted-pool WARN with
 the endpoint and the likely cause; connects, discards and evictions are DEBUG. Credentials never
 reach a log line, and a test asserts it across a whole client lifecycle.
+
+## Observability
+
+Both facades can be wrapped, and neither the core nor the API learns what a meter is:
+
+```java
+SftpClient metered = MicrometerSftpClient.wrap(client, registry, config);
+SftpClient traced  = OpenTelemetrySftpClient.wrap(client, openTelemetry, config);
+SftpPoolMetrics.bind(pool, registry, Tags.of("endpoint", "bank-a"));
+```
+
+Metrics give `sftp.client.operations` timers (tagged operation and outcome),
+`sftp.client.transferred` byte counters, and — from `bind` — pool gauges plus borrow-wait, timeout,
+discard, eviction and validation-failure meters. Waits climb before timeouts do, which is the point:
+the gauges alone sample right past a pool that is quietly too small.
+
+Tracing gives a CLIENT span per operation, with a `withSession` block becoming one `sftp.session`
+span and its operations nested beneath. Note the deliberate asymmetry: metrics do **not** aggregate
+convenience methods (`mkdirs` reports the three `mkdir` calls that crossed the wire), while tracing
+does, because a trace view wants the tree and a counter wants the wire.
+
+> **There is no OpenTelemetry semantic convention for file transfer** — searching the
+> semantic-conventions repository for `sftp` returns nothing. Connection attributes here are stable
+> and standard; the `file.*` ones are experimental and may move. `SftpAttributes` labels each one.
+> Remote paths become span attributes, and filenames often embed business data, so `wrap` takes an
+> optional redactor.
 
 ## The things worth reading first
 
@@ -301,9 +368,14 @@ binary.
   attributes are experimental because **no OpenTelemetry semantic convention for file transfer
   exists** — see its `SftpAttributes`. Quarkus Dev Services is written up in
   [ROADMAP.md](ROADMAP.md) under "Backlog" with the design question to settle first.
-- The reactive facade still lacks `visit` and the `java.nio.file.Path` transfers. `visit` needs a
-  streaming listing to be worth having (its blocking form stops the walk early, which
+- The reactive facade lacks `visit` and the `java.nio.file.Path` transfers, deliberately. `visit`
+  needs a streaming listing to be worth having (its blocking form stops the walk early, which
   `CompletionStage<List<..>>` cannot express), and `Path` transfers would put blocking file I/O
-  behind a reactive signature without letting the caller choose the scheduler. Everything else —
-  `mkdirs`, `deleteRecursively`, `chmod`, `findFirst`, filtered `list`, `uploadAtomically` — is on
-  both facades.
+  behind a reactive signature without letting the caller choose the scheduler.
+- The wrapper parity tests compare **method names**, not signatures. A wrapper can therefore still
+  lag an *overload* — checking signatures would mean re-encoding each wrapper's type mapping
+  (`CompletionStage`→`Uni`, `ByteBuffer`→`Buffer`) into the test, which is its own thing to get
+  wrong.
+- Numeric ownership is unavailable on SFTP v4+, which replaced uid/gid with owner *names*.
+  `RemoteFile.ownerId()` returns `UNKNOWN_ID` there rather than a fabricated number, so a chown
+  written on a v6 server cannot be read back through this API.
