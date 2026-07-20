@@ -323,6 +323,11 @@ final class MinaSftpSession implements SftpSession {
 
     private static RemoteFile toRemoteFile(String name, String path, SftpClient.Attributes attrs) {
         FileTime modified = attrs.getModifyTime();
+        // UidGid only, emphatically not OwnerGroup: v6 servers send owner *names*, and MINA's
+        // getUserId() then falls back to 0 — which would report every file as owned by root.
+        // A confidently wrong uid is worse than UNKNOWN_ID; the probe that caught this saw 0/0
+        // from a v6 server whose files belonged to an ordinary user.
+        boolean hasIds = attrs.getFlags().contains(SftpClient.Attribute.UidGid);
         return new RemoteFile(
                 name,
                 path,
@@ -330,7 +335,9 @@ final class MinaSftpSession implements SftpSession {
                 attrs.isDirectory(),
                 attrs.isSymbolicLink(),
                 modified == null ? Instant.EPOCH : modified.toInstant(),
-                attrs.getPermissions());
+                attrs.getPermissions(),
+                hasIds ? attrs.getUserId() : RemoteFile.UNKNOWN_ID,
+                hasIds ? attrs.getGroupId() : RemoteFile.UNKNOWN_ID);
     }
 
     private static String join(String dir, String name) {

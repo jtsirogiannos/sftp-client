@@ -19,6 +19,10 @@ import java.util.Objects;
  * @param symlink     true if this entry is a symbolic link; {@link #size()} then describes the link
  * @param modified    last-modified time, truncated to seconds on v3 servers
  * @param permissions POSIX permission bits ({@code 0644}), or {@code -1} if the server omitted them
+ * @param ownerId     numeric uid, or {@link #UNKNOWN_ID} if the server omitted it. The read half of
+ *                    {@link AttributeUpdate#ownerId()} — without it, ownership could be written but
+ *                    never inspected or verified
+ * @param groupId     numeric gid, or {@link #UNKNOWN_ID} if the server omitted it
  */
 public record RemoteFile(
     String name,
@@ -27,12 +31,17 @@ public record RemoteFile(
     boolean directory,
     boolean symlink,
     Instant modified,
-    int permissions) {
+    int permissions,
+    int ownerId,
+    int groupId) {
 
     /**
      * Permission value used when the server did not report a mode.
      */
     public static final int UNKNOWN_PERMISSIONS = -1;
+
+    /** Owner/group value used when the server did not report one. */
+    public static final int UNKNOWN_ID = -1;
 
     public RemoteFile {
         Objects.requireNonNull(name, "name");
@@ -46,7 +55,8 @@ public record RemoteFile(
      * Convenience for providers that have no mtime or mode to report.
      */
     public static RemoteFile of(String name, String path, long size, boolean directory) {
-        return new RemoteFile(name, path, size, directory, false, Instant.EPOCH, UNKNOWN_PERMISSIONS);
+        return new RemoteFile(name, path, size, directory, false, Instant.EPOCH,
+            UNKNOWN_PERMISSIONS, UNKNOWN_ID, UNKNOWN_ID);
     }
 
     /**

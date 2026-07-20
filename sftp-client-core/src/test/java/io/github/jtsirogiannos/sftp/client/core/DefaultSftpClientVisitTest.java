@@ -280,7 +280,7 @@ public class DefaultSftpClientVisitTest {
             for (int i = 0; i < entryCount; i++) {
                 entriesVisited.incrementAndGet();
                 RemoteFile entry = new RemoteFile("file-" + i + ".txt", path + "/file-" + i + ".txt",
-                        1, false, false, Instant.EPOCH, 0644);
+                        1, false, false, Instant.EPOCH, 0644, RemoteFile.UNKNOWN_ID, RemoteFile.UNKNOWN_ID);
                 if (!visitor.test(entry)) {
                     return; // provider closes its handle here
                 }

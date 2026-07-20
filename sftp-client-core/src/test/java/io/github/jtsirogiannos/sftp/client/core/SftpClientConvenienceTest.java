@@ -259,7 +259,7 @@ public class SftpClientConvenienceTest {
             boolean symlink = symlinks.contains(path);
             boolean directory = !symlink && dirs.contains(path);
             long size = files.containsKey(path) ? files.get(path).length : 0;
-            return new RemoteFile(name, path, size, directory, symlink, Instant.EPOCH, 0644);
+            return new RemoteFile(name, path, size, directory, symlink, Instant.EPOCH, 0644, RemoteFile.UNKNOWN_ID, RemoteFile.UNKNOWN_ID);
         }
 
         /**
@@ -277,7 +277,7 @@ public class SftpClientConvenienceTest {
                 RemoteFile target = entry(linkTargets.get(path));
                 // Reported as the target: a caller cannot tell it went through a link.
                 return new RemoteFile(nameOf(path), path, target.size(), target.directory(), false,
-                        Instant.EPOCH, 0644);
+                        Instant.EPOCH, 0644, RemoteFile.UNKNOWN_ID, RemoteFile.UNKNOWN_ID);
             }
             return entry(path);
         }

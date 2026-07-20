@@ -454,7 +454,7 @@ final class InMemorySftpSession implements SftpSession, AsyncSftpSession {
         String name = normalised.substring(normalised.lastIndexOf('/') + 1);
         return new RemoteFile(name.isEmpty() ? "/" : name, normalised, node.size(),
                 node.kind == Node.Kind.DIRECTORY, node.kind == Node.Kind.SYMLINK,
-                node.modified, node.permissions);
+                node.modified, node.permissions, node.ownerId, node.groupId);
     }
 
     /** Collects the write and publishes it to the filesystem on close. */

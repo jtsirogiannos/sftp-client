@@ -100,6 +100,38 @@ class SftpClientIntegrationTest {
     }
 
     /**
+     * Ownership must be readable where the wire carries it, and honestly unknown where it does not.
+     *
+     * <p>JSch negotiates v3, whose stat replies carry numeric uid/gid — real values, verifiable
+     * after a chown. MINA negotiates v6 against this server, and v6 replaced numeric ids with owner
+     * <em>names</em>; the first version of this mapping reported MINA's zero-default as uid 0,
+     * claiming every file belonged to root. UNKNOWN_ID is the honest answer there.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"mina", "jsch"})
+    void ownershipIsReadableWhereTheWireCarriesIt(String provider) {
+        String base = scratch("ownership");
+        String path = base + "/f.txt";
+        try (SftpClient client = client(provider)) {
+            client.mkdirs(base);
+            client.upload(path, text("x"));
+
+            RemoteFile stat = client.stat(path);
+            if (client.capabilities().maxSftpVersion() >= 4) {
+                assertThat(stat.ownerId())
+                        .describedAs("v4+ carries owner names, not numeric ids; a number here is invented")
+                        .isEqualTo(RemoteFile.UNKNOWN_ID);
+            } else {
+                assertThat(stat.ownerId())
+                        .describedAs("v3 stat replies carry a real uid")
+                        .isNotEqualTo(RemoteFile.UNKNOWN_ID)
+                        .isNotEqualTo(0);
+                assertThat(stat.groupId()).isNotEqualTo(RemoteFile.UNKNOWN_ID);
+            }
+        }
+    }
+
+    /**
      * The one that would have been an incident. {@code stat} resolves a symlink, so a traversal that
      * uses it treats a link to a directory as a directory and deletes the contents of somewhere
      * else entirely. Only {@code lstat} sees the link.

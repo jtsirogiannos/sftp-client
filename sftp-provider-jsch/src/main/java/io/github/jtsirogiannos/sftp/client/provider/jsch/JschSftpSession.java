@@ -248,6 +248,9 @@ final class JschSftpSession implements SftpSession {
     }
 
     private static RemoteFile toRemoteFile(String name, String path, SftpATTRS attrs) {
+        // v3 stat replies carry numeric uid/gid; report them so ownership set through
+        // setAttributes can be read back and verified rather than being write-only.
+        boolean hasIds = (attrs.getFlags() & SftpATTRS.SSH_FILEXFER_ATTR_UIDGID) != 0;
         return new RemoteFile(
                 name,
                 path,
@@ -256,8 +259,10 @@ final class JschSftpSession implements SftpSession {
                 attrs.isLink(),
                 // v3 mtimes are whole seconds, and JSch narrows them to a signed int: fine until
                 // 2038, and there is nothing more precise on the wire to recover.
-                Instant.ofEpochSecond(Integer.toUnsignedLong(attrs.getMTime())),
-                attrs.getPermissions());
+                Instant.ofEpochSecond(attrs.getMTime()),
+                attrs.getPermissions() & 07777,
+                hasIds ? attrs.getUId() : RemoteFile.UNKNOWN_ID,
+                hasIds ? attrs.getGId() : RemoteFile.UNKNOWN_ID);
     }
 
     private static String join(String dir, String name) {

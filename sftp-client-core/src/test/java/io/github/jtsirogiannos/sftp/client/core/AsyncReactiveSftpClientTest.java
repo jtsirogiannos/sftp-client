@@ -255,7 +255,7 @@ public class AsyncReactiveSftpClientTest {
 
         static RemoteFile file(String path) {
             String name = path.substring(path.lastIndexOf('/') + 1);
-            return new RemoteFile(name, path, CONTENT.length, false, false, Instant.EPOCH, 0644);
+            return new RemoteFile(name, path, CONTENT.length, false, false, Instant.EPOCH, 0644, RemoteFile.UNKNOWN_ID, RemoteFile.UNKNOWN_ID);
         }
 
         @Override
