@@ -60,6 +60,11 @@ public final class MicrometerSftpClient extends ForwardingSftpOperations impleme
      *
      * <p>The host, port and username come from the config because a process with several endpoints
      * produces meters that are otherwise indistinguishable. No credential is read.
+     *
+     * <p><strong>The {@code user} tag discloses service-account names to metrics readers</strong>,
+     * which in many organisations is a wider audience than log access. That is usually fine — it is
+     * an account name, not a secret — but a deployment with a stricter metrics policy should use
+     * {@link #wrap(SftpClient, MeterRegistry, Tags)} and choose its own tags instead.
      */
     public static SftpClient wrap(SftpClient client, MeterRegistry registry,
             SftpConnectionConfig config) {

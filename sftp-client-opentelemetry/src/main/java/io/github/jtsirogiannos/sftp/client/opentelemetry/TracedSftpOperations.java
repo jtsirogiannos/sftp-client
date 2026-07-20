@@ -29,11 +29,14 @@ final class TracedSftpOperations extends ForwardingSftpOperations {
     private final SftpOperations delegate;
     private final Tracer tracer;
     private final Endpoint endpoint;
+    private final java.util.function.UnaryOperator<String> pathRedactor;
 
-    TracedSftpOperations(SftpOperations delegate, Tracer tracer, Endpoint endpoint) {
+    TracedSftpOperations(SftpOperations delegate, Tracer tracer, Endpoint endpoint,
+            java.util.function.UnaryOperator<String> pathRedactor) {
         this.delegate = delegate;
         this.tracer = tracer;
         this.endpoint = endpoint;
+        this.pathRedactor = pathRedactor;
     }
 
     @Override
@@ -191,7 +194,8 @@ final class TracedSftpOperations extends ForwardingSftpOperations {
             .setAttribute(SftpAttributes.SERVER_ADDRESS, endpoint.host())
             .setAttribute(SftpAttributes.SERVER_PORT, (long) endpoint.port())
             .setAttribute(SftpAttributes.NETWORK_PROTOCOL_NAME, "sftp")
-            .setAttribute(SftpAttributes.FILE_PATH, path);
+            // Redacted before it leaves the process: filenames embed business data.
+            .setAttribute(SftpAttributes.FILE_PATH, pathRedactor.apply(path));
         endpoint.protocolVersion()
             .ifPresent(v -> builder.setAttribute(SftpAttributes.NETWORK_PROTOCOL_VERSION, v));
         return builder.startSpan();

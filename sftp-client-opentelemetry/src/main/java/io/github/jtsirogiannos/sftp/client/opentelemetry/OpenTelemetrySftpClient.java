@@ -53,11 +53,15 @@ public final class OpenTelemetrySftpClient extends ForwardingSftpOperations impl
     private final Endpoint endpoint;
     private final SftpOperations traced;
 
-    private OpenTelemetrySftpClient(SftpClient client, Tracer tracer, Endpoint endpoint) {
+    private final java.util.function.UnaryOperator<String> pathRedactor;
+
+    private OpenTelemetrySftpClient(SftpClient client, Tracer tracer, Endpoint endpoint,
+            java.util.function.UnaryOperator<String> pathRedactor) {
         this.client = client;
         this.tracer = tracer;
         this.endpoint = endpoint;
-        this.traced = new TracedSftpOperations(client, tracer, endpoint);
+        this.pathRedactor = pathRedactor;
+        this.traced = new TracedSftpOperations(client, tracer, endpoint, pathRedactor);
     }
 
     /**
@@ -71,12 +75,28 @@ public final class OpenTelemetrySftpClient extends ForwardingSftpOperations impl
      */
     public static SftpClient wrap(SftpClient client, OpenTelemetry openTelemetry,
             SftpConnectionConfig config) {
+        return wrap(client, openTelemetry, config, java.util.function.UnaryOperator.identity());
+    }
+
+    /**
+     * As {@link #wrap(SftpClient, OpenTelemetry, SftpConnectionConfig)}, with every remote path
+     * passed through {@code pathRedactor} before it becomes the {@code file.path} span attribute.
+     *
+     * <p>Span attributes are exported, stored and displayed, and remote filenames routinely embed
+     * account numbers, customer names or tokens — the drop-folder use cases this library documents
+     * are exactly the ones that name files after business entities. A deployment with that shape
+     * passes a redactor ({@code path -> hash(path)}, keep-the-directory-drop-the-name, or
+     * {@code path -> "[redacted]"}); everyone else pays nothing.
+     */
+    public static SftpClient wrap(SftpClient client, OpenTelemetry openTelemetry,
+            SftpConnectionConfig config, java.util.function.UnaryOperator<String> pathRedactor) {
         Endpoint endpoint = Endpoint.of(config,
             // Lazily: the negotiated version is a property of a session, and asking the client
             // before one exists would report the provider's ceiling as though it were agreed.
             () -> Optional.ofNullable(client.capabilities())
                 .map(c -> Integer.toString(c.maxSftpVersion())));
-        return new OpenTelemetrySftpClient(client, openTelemetry.getTracer(SCOPE), endpoint);
+        return new OpenTelemetrySftpClient(client, openTelemetry.getTracer(SCOPE), endpoint,
+            pathRedactor);
     }
 
     @Override
@@ -89,7 +109,7 @@ public final class OpenTelemetrySftpClient extends ForwardingSftpOperations impl
         Span span = sessionSpan();
         try (Scope ignored = span.makeCurrent()) {
             return client.withSession(operations ->
-                work.apply(new TracedSftpOperations(operations, tracer, endpoint)));
+                work.apply(new TracedSftpOperations(operations, tracer, endpoint, pathRedactor)));
         } catch (RuntimeException e) {
             span.setStatus(StatusCode.ERROR);
             span.setAttribute(SftpAttributes.ERROR_TYPE, e.getClass().getCanonicalName());

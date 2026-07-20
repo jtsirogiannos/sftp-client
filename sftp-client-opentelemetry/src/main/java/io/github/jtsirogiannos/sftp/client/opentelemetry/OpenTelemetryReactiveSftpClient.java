@@ -48,22 +48,34 @@ public final class OpenTelemetryReactiveSftpClient extends ForwardingReactiveSft
     private final ReactiveSftpClient client;
     private final Tracer tracer;
     private final Endpoint endpoint;
+    private final java.util.function.UnaryOperator<String> pathRedactor;
 
     private OpenTelemetryReactiveSftpClient(ReactiveSftpClient client, Tracer tracer,
-            Endpoint endpoint) {
+            Endpoint endpoint, java.util.function.UnaryOperator<String> pathRedactor) {
         this.client = client;
         this.tracer = tracer;
         this.endpoint = endpoint;
+        this.pathRedactor = pathRedactor;
     }
 
     /** Wraps {@code client}, taking the {@link OpenTelemetry} instance rather than the global. */
     public static ReactiveSftpClient wrap(ReactiveSftpClient client, OpenTelemetry openTelemetry,
             SftpConnectionConfig config) {
+        return wrap(client, openTelemetry, config, java.util.function.UnaryOperator.identity());
+    }
+
+    /**
+     * As {@link #wrap(ReactiveSftpClient, OpenTelemetry, SftpConnectionConfig)}, with every remote
+     * path passed through {@code pathRedactor} before it becomes the {@code file.path} attribute —
+     * see the blocking client's documentation for why a deployment would want that.
+     */
+    public static ReactiveSftpClient wrap(ReactiveSftpClient client, OpenTelemetry openTelemetry,
+            SftpConnectionConfig config, java.util.function.UnaryOperator<String> pathRedactor) {
         Endpoint endpoint = Endpoint.of(config,
             () -> Optional.ofNullable(client.capabilities())
                 .map(c -> Integer.toString(c.maxSftpVersion())));
         return new OpenTelemetryReactiveSftpClient(client,
-            openTelemetry.getTracer(OpenTelemetrySftpClient.SCOPE), endpoint);
+            openTelemetry.getTracer(OpenTelemetrySftpClient.SCOPE), endpoint, pathRedactor);
     }
 
     @Override
@@ -177,7 +189,8 @@ public final class OpenTelemetryReactiveSftpClient extends ForwardingReactiveSft
             .setAttribute(SftpAttributes.SERVER_ADDRESS, endpoint.host())
             .setAttribute(SftpAttributes.SERVER_PORT, (long) endpoint.port())
             .setAttribute(SftpAttributes.NETWORK_PROTOCOL_NAME, "sftp")
-            .setAttribute(SftpAttributes.FILE_PATH, path);
+            // Redacted before it leaves the process: filenames embed business data.
+            .setAttribute(SftpAttributes.FILE_PATH, pathRedactor.apply(path));
         endpoint.protocolVersion()
             .ifPresent(v -> builder.setAttribute(SftpAttributes.NETWORK_PROTOCOL_VERSION, v));
         return builder.startSpan();

@@ -117,6 +117,27 @@ class OpenTelemetrySftpClientTest {
         assertThat(session.getKind().name()).isEqualTo("INTERNAL");
     }
 
+    /** The redactor must be what reaches the exporter, or it is decorative. */
+    @Test
+    void appliesThePathRedactorBeforeExport() {
+        InMemorySpanExporter redactedSpans = InMemorySpanExporter.create();
+        OpenTelemetrySdk sdk = OpenTelemetrySdk.builder()
+            .setTracerProvider(SdkTracerProvider.builder()
+                .addSpanProcessor(SimpleSpanProcessor.create(redactedSpans)).build())
+            .build();
+        SftpClient redacting = OpenTelemetrySftpClient.wrap(
+            SftpClients.blocking("inmemory", config()), sdk, config(),
+            path -> "[redacted]");
+
+        redacting.mkdir("/upload/account-4711");
+
+        SpanData span = redactedSpans.getFinishedSpanItems().get(0);
+        assertThat(span.getAttributes().get(SftpAttributes.FILE_PATH)).isEqualTo("[redacted]");
+        assertThat(span.getAttributes().asMap().values().toString())
+            .describedAs("the real path must not leak through any attribute")
+            .doesNotContain("account-4711");
+    }
+
     // --- helpers ---
 
     private SpanData only(String name) {
