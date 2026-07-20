@@ -72,12 +72,19 @@ final class WriteSubscriber implements Flow.Subscriber<ByteBuffer> {
 
     /** Stops the producer and releases the session; idempotent via {@link #finish}. */
     private void cancelTransfer() {
+        // finish() BEFORE reading the subscription, not after. This pairs with onSubscribe, which
+        // writes the subscription and then checks finished: with both orderings in place, one side
+        // must see the other (the volatile write/read pairs cannot both miss), so the producer is
+        // cancelled by whichever of the two runs second. The old order — read subscription, then
+        // finish — left a window where a cancel arriving just before onSubscribe saw null here and
+        // finished=false there, and the producer was requested from but never cancelled: a stalled
+        // upstream holding whatever resources it owns, forever.
+        log.debug("Upload cancelled by the caller; discarding the session");
+        finish(new SftpException("upload cancelled"));
         Flow.Subscription current = subscription;
         if (current != null) {
             current.cancel();
         }
-        log.debug("Upload cancelled by the caller; discarding the session");
-        finish(new SftpException("upload cancelled"));
     }
 
     @Override
