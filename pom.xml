@@ -38,6 +38,9 @@
 
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
+    <!-- Reproducible builds: jars carry this timestamp instead of the build machine's clock, so
+         the same commit produces byte-identical artifacts anywhere. Bump alongside the version. -->
+    <project.build.outputTimestamp>2026-07-20T00:00:00Z</project.build.outputTimestamp>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
     <!-- Verify before first build; all version bumps happen here. -->
@@ -105,6 +108,19 @@
         The API only. A library that ships a logging *implementation* picks the fight for its
         users; slf4j-api is the one dependency that lets them keep choosing.
       -->
+      <!-- Convergence pins, found by the enforcer the day it was turned on: kotlin-stdlib and
+           kotlinx-coroutines each drag their own version of the other's transitive deps. Pinned to
+           the versions this build compiles against. -->
+      <dependency>
+        <groupId>org.jetbrains.kotlin</groupId>
+        <artifactId>kotlin-stdlib</artifactId>
+        <version>${kotlin.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.jetbrains</groupId>
+        <artifactId>annotations</artifactId>
+        <version>26.0.2</version>
+      </dependency>
       <dependency>
         <groupId>org.slf4j</groupId>
         <artifactId>slf4j-api</artifactId>
@@ -150,6 +166,27 @@
       </plugins>
     </pluginManagement>
     <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-enforcer-plugin</artifactId>
+          <version>3.5.0</version>
+          <executions>
+            <execution>
+              <id>enforce</id>
+              <goals><goal>enforce</goal></goals>
+              <configuration>
+                <rules>
+                  <!-- Two versions of one artifact on a classpath is how the SmallRye-style
+                       NoSuchMethodError happens to consumers; fail the build here instead. -->
+                  <dependencyConvergence/>
+                  <requireMavenVersion><version>3.9</version></requireMavenVersion>
+                  <requireJavaVersion><version>17</version></requireJavaVersion>
+                </rules>
+              </configuration>
+            </execution>
+          </executions>
+        </plugin>
+
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>

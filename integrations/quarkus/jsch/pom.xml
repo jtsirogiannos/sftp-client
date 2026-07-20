@@ -20,6 +20,19 @@
     <dependencies>
         <dependency><groupId>io.github.jtsirogiannos</groupId><artifactId>quarkus-sftp-client</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>io.github.jtsirogiannos</groupId><artifactId>sftp-provider-jsch</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>io.quarkiverse.jsch</groupId><artifactId>quarkus-jsch</artifactId><version>${quarkus-jsch.version}</version></dependency>
+        <dependency>
+            <groupId>io.quarkiverse.jsch</groupId>
+            <artifactId>quarkus-jsch</artifactId>
+            <version>${quarkus-jsch.version}</version>
+            <exclusions>
+                <!-- quarkus-jsch 3.2.0 drags jsch 2.28.2; our provider compiles and tests against
+                     2.28.4, and two versions of one artifact is the failure mode the enforcer's
+                     convergence rule exists to prevent. The provider's direct dependency wins. -->
+                <exclusion>
+                    <groupId>com.github.mwiede</groupId>
+                    <artifactId>jsch</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
     </dependencies>
 </project>
