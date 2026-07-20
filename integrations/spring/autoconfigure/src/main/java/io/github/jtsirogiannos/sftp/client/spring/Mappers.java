@@ -28,6 +28,13 @@ final class Mappers {
      * @throws IllegalArgumentException if the endpoint is incompletely configured — thrown at
      *                                  startup while the context is building, which is exactly when you want to hear it
      */
+    static io.github.jtsirogiannos.sftp.client.pool.PoolSettings toPoolSettings(
+            SftpClientProperties.Endpoint endpoint) {
+        SftpClientProperties.Endpoint.Pool pool = endpoint.getPool();
+        return new io.github.jtsirogiannos.sftp.client.pool.PoolSettings(
+            pool.getMaxSize(), pool.getMaxIdle(), pool.getAcquireTimeout());
+    }
+
     static SftpConnectionConfig toConfig(SftpClientProperties.Endpoint endpoint) {
         SftpConnectionConfig.Builder builder = SftpConnectionConfig.builder()
             .host(endpoint.getHost())

@@ -99,5 +99,30 @@ public interface SftpRuntimeConfig {
          */
         @WithDefault("PT30S")
         Duration requestTimeout();
+
+        /** Pool tuning for this endpoint, bound from {@code sftp.endpoints.<name>.pool.*}. */
+        PoolConfig pool();
+
+        interface PoolConfig {
+
+            /**
+             * Most sessions the pool holds — the ceiling on concurrent operations for this
+             * endpoint. The ninth concurrent caller on the default of 8 waits for
+             * {@code acquire-timeout} and then fails.
+             */
+            @WithDefault("8")
+            int maxSize();
+
+            /**
+             * How long a parked session may sit before being closed instead of reused. Align with
+             * the server's idle timeout if parked sessions keep dying.
+             */
+            @WithDefault("PT5M")
+            Duration maxIdle();
+
+            /** How long a borrow waits at capacity before failing loudly. */
+            @WithDefault("PT30S")
+            Duration acquireTimeout();
+        }
     }
 }

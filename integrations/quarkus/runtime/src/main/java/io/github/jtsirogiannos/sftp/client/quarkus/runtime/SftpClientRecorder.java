@@ -41,7 +41,10 @@ public class SftpClientRecorder {
 
     public Function<SyntheticCreationalContext<SftpClient>, SftpClient> blockingClient(
             String name, String provider) {
-        return context -> SftpClients.blocking(provider, connectionConfig(config.getValue(), name));
+        return context -> {
+            SftpRuntimeConfig.EndpointRuntimeConfig endpoint = endpoint(config.getValue(), name);
+            return SftpClients.blocking(provider, connectionConfig(endpoint, name), poolSettings(endpoint));
+        };
     }
 
     /**
@@ -52,12 +55,15 @@ public class SftpClientRecorder {
             String name, String provider, Executor worker) {
         return context -> {
             ReactiveSftpClient delegate =
-                    SftpClients.reactive(provider, connectionConfig(config.getValue(), name), worker);
+                    SftpClients.reactive(provider,
+                            connectionConfig(endpoint(config.getValue(), name), name), worker,
+                            poolSettings(endpoint(config.getValue(), name)));
             return new MutinySftpClient(delegate);
         };
     }
 
-    private static SftpConnectionConfig connectionConfig(SftpRuntimeConfig config, String name) {
+    private static SftpRuntimeConfig.EndpointRuntimeConfig endpoint(SftpRuntimeConfig config,
+            String name) {
         SftpRuntimeConfig.EndpointRuntimeConfig endpoint = config.endpoints().get(name);
         if (endpoint == null) {
             // The build fixed the endpoint names, so a mismatch means run-time config dropped one.
@@ -65,6 +71,18 @@ public class SftpClientRecorder {
                     + "'; it was present at build time. Check that sftp.endpoints." + name
                     + ".* is set in this environment.");
         }
+        return endpoint;
+    }
+
+    private static io.github.jtsirogiannos.sftp.client.pool.PoolSettings poolSettings(
+            SftpRuntimeConfig.EndpointRuntimeConfig endpoint) {
+        SftpRuntimeConfig.EndpointRuntimeConfig.PoolConfig pool = endpoint.pool();
+        return new io.github.jtsirogiannos.sftp.client.pool.PoolSettings(
+                pool.maxSize(), pool.maxIdle(), pool.acquireTimeout());
+    }
+
+    private static SftpConnectionConfig connectionConfig(
+            SftpRuntimeConfig.EndpointRuntimeConfig endpoint, String name) {
 
         SftpConnectionConfig.Builder builder = SftpConnectionConfig.builder()
                 .host(endpoint.host())

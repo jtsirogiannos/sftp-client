@@ -5,6 +5,7 @@ import io.github.jtsirogiannos.sftp.client.api.SftpClient;
 import io.github.jtsirogiannos.sftp.client.api.SftpConnectionConfig;
 import io.github.jtsirogiannos.sftp.client.api.SftpException;
 import io.github.jtsirogiannos.sftp.client.pool.BoundedSftpSessionPool;
+import io.github.jtsirogiannos.sftp.client.pool.PoolSettings;
 import io.github.jtsirogiannos.sftp.client.spi.AsyncSftpProvider;
 import io.github.jtsirogiannos.sftp.client.spi.SftpProvider;
 
@@ -60,10 +61,17 @@ public final class SftpClients {
     }
 
     public static SftpClient blocking(String providerName, SftpConnectionConfig config) {
+        return blocking(providerName, config, PoolSettings.defaults());
+    }
+
+    /** As {@link #blocking(String, SftpConnectionConfig)}, with the pool tuned rather than default. */
+    public static SftpClient blocking(String providerName, SftpConnectionConfig config,
+            PoolSettings pool) {
         SftpProvider provider = provider(providerName);
         log.debug("Creating a blocking client for {} using provider '{}' (available: {})", config,
                 providerName, availableProviders());
-        return new DefaultSftpClient(provider, BoundedSftpSessionPool.blocking(provider, config));
+        return new DefaultSftpClient(provider, BoundedSftpSessionPool.blocking(provider, config,
+                pool.maxSize(), pool.maxIdle(), pool.acquireTimeout()));
     }
 
     /**
@@ -77,15 +85,23 @@ public final class SftpClients {
      */
     public static ReactiveSftpClient reactive(String providerName, SftpConnectionConfig config,
                                               Executor worker) {
+        return reactive(providerName, config, worker, PoolSettings.defaults());
+    }
+
+    /** As {@link #reactive(String, SftpConnectionConfig, Executor)}, with the pool tuned. */
+    public static ReactiveSftpClient reactive(String providerName, SftpConnectionConfig config,
+                                              Executor worker, PoolSettings pool) {
         SftpProvider provider = provider(providerName);
         if (provider instanceof AsyncSftpProvider asyncProvider) {
             log.debug("Creating an async reactive client for {} using provider '{}'", config,
                 providerName);
             return new AsyncReactiveSftpClient(asyncProvider,
-                BoundedSftpSessionPool.async(asyncProvider, config), worker);
+                BoundedSftpSessionPool.async(asyncProvider, config, pool.maxSize(), pool.maxIdle(),
+                    pool.acquireTimeout()), worker);
         }
         log.debug("Creating a reactive client for {} using provider '{}'", config, providerName);
         return new DefaultReactiveSftpClient(provider,
-            BoundedSftpSessionPool.blocking(provider, config), worker);
+            BoundedSftpSessionPool.blocking(provider, config, pool.maxSize(), pool.maxIdle(),
+                pool.acquireTimeout()), worker);
     }
 }

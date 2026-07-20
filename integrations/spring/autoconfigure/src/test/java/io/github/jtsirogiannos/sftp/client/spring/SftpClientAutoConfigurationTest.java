@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Drives the starter the way an application would: build a context from properties, pull the beans
@@ -54,6 +55,27 @@ class SftpClientAutoConfigurationTest {
                 "sftp.endpoints." + name + ".password=" + EmbeddedSftpServer.PASSWORD,
                 "sftp.endpoints." + name + ".host-key-strategy=insecure_accept_any",
         };
+    }
+
+    /**
+     * The pool properties must actually reach the pool, not merely bind. A max-size of 1 with a
+     * short acquire timeout makes the second concurrent borrow fail — observable through the
+     * client, so this exercises the whole chain from property to BoundedSftpSessionPool.
+     */
+    @Test
+    void poolPropertiesReachThePool() {
+        runner().withPropertyValues(endpoint("bank-a"))
+                .withPropertyValues(
+                        "sftp.endpoints.bank-a.pool.max-size=1",
+                        "sftp.endpoints.bank-a.pool.acquire-timeout=150ms")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    SftpClient client = context.getBean("sftpClient-bank-a", SftpClient.class);
+                    // Hold the only session via a unit of work; a second one must time out.
+                    assertThatThrownBy(() -> client.withSessionWithoutResult(held ->
+                            client.withSessionWithoutResult(second -> { })))
+                            .hasMessageContaining("all 1 are in use");
+                });
     }
 
     @Test

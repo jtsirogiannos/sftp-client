@@ -72,10 +72,12 @@ public class SftpClientRegistrar implements BeanDefinitionRegistryPostProcessor,
 
             String providerName = endpoint.getProvider();
             SftpConnectionConfig config;
+            io.github.jtsirogiannos.sftp.client.pool.PoolSettings pool;
             try {
                 // Fail now, naming the endpoint. A bare "host must not be blank" from deep in a
                 // builder is useless when six endpoints are configured.
                 config = Mappers.toConfig(endpoint);
+                pool = Mappers.toPoolSettings(endpoint);
                 SftpClients.provider(providerName);
             } catch (RuntimeException e) {
                 throw new IllegalStateException(
@@ -83,9 +85,9 @@ public class SftpClientRegistrar implements BeanDefinitionRegistryPostProcessor,
             }
 
             registry.registerBeanDefinition("sftpClient-" + name,
-                    blockingDefinition(providerName, config, single));
+                    blockingDefinition(providerName, config, pool, single));
             registry.registerBeanDefinition("reactiveSftpClient-" + name,
-                    reactiveDefinition(providerName, config, single));
+                    reactiveDefinition(providerName, config, pool, single));
         }
     }
 
@@ -95,9 +97,10 @@ public class SftpClientRegistrar implements BeanDefinitionRegistryPostProcessor,
     }
 
     private RootBeanDefinition blockingDefinition(String provider, SftpConnectionConfig config,
+                                                  io.github.jtsirogiannos.sftp.client.pool.PoolSettings pool,
                                                   boolean primary) {
         RootBeanDefinition definition = new RootBeanDefinition(SftpClient.class);
-        definition.setInstanceSupplier(() -> SftpClients.blocking(provider, config));
+        definition.setInstanceSupplier(() -> SftpClients.blocking(provider, config, pool));
         // Closing the client closes its pool, so the context shutting down releases the connections.
         definition.setDestroyMethodName("close");
         definition.setPrimary(primary);
@@ -105,12 +108,13 @@ public class SftpClientRegistrar implements BeanDefinitionRegistryPostProcessor,
     }
 
     private RootBeanDefinition reactiveDefinition(String provider, SftpConnectionConfig config,
+                                                  io.github.jtsirogiannos.sftp.client.pool.PoolSettings pool,
                                                   boolean primary) {
         RootBeanDefinition definition = new RootBeanDefinition(ReactiveSftpClient.class);
         // Resolved lazily inside the supplier: the executor is an ordinary bean, and this
         // post-processor runs long before it exists.
         definition.setInstanceSupplier(() -> SftpClients.reactive(provider, config,
-                beanFactory.getBean(WORKER_EXECUTOR_BEAN, Executor.class)));
+                beanFactory.getBean(WORKER_EXECUTOR_BEAN, Executor.class), pool));
         definition.setDestroyMethodName("close");
         definition.setPrimary(primary);
         return definition;

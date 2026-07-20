@@ -122,6 +122,49 @@ public class SftpClientProperties {
 
         private Duration requestTimeout = Duration.ofSeconds(30);
 
+        /**
+         * Pool tuning, bound from {@code sftp.endpoints.<name>.pool.*}. Defaults match the core:
+         * 8 sessions, 5 minutes idle, 30 seconds to acquire. The ninth concurrent operation on a
+         * default-sized pool waits and then fails — size {@code max-size} for the operations you
+         * expect to overlap.
+         */
+        private final Pool pool = new Pool();
+
+        public Pool getPool() {
+            return pool;
+        }
+
+        public static class Pool {
+
+            private int maxSize = 8;
+            private Duration maxIdle = Duration.ofMinutes(5);
+            private Duration acquireTimeout = Duration.ofSeconds(30);
+
+            public int getMaxSize() {
+                return maxSize;
+            }
+
+            public void setMaxSize(int maxSize) {
+                this.maxSize = maxSize;
+            }
+
+            public Duration getMaxIdle() {
+                return maxIdle;
+            }
+
+            public void setMaxIdle(Duration maxIdle) {
+                this.maxIdle = maxIdle;
+            }
+
+            public Duration getAcquireTimeout() {
+                return acquireTimeout;
+            }
+
+            public void setAcquireTimeout(Duration acquireTimeout) {
+                this.acquireTimeout = acquireTimeout;
+            }
+        }
+
         public String getProvider() {
             return provider;
         }

@@ -52,7 +52,12 @@ class SftpClientExtensionTest {
             .overrideConfigKey("sftp.endpoints.bank-b.port", "${sftp-test.port}")
             .overrideConfigKey("sftp.endpoints.bank-b.username", "${sftp-test.user}")
             .overrideConfigKey("sftp.endpoints.bank-b.password", "${sftp-test.password}")
-            .overrideConfigKey("sftp.endpoints.bank-b.host-key-strategy", "INSECURE_ACCEPT_ANY");
+            .overrideConfigKey("sftp.endpoints.bank-b.host-key-strategy", "INSECURE_ACCEPT_ANY")
+            // bank-b doubles as the pool-tuning fixture: a single session and a short acquire
+            // timeout make "the settings reached the pool" observable as a second borrow failing.
+            // Its other tests run one operation at a time, which a one-session pool serves fine.
+            .overrideConfigKey("sftp.endpoints.bank-b.pool.max-size", "1")
+            .overrideConfigKey("sftp.endpoints.bank-b.pool.acquire-timeout", "150ms");
 
     @Inject
     @NamedSftp("bank-a")
@@ -65,6 +70,18 @@ class SftpClientExtensionTest {
     @Inject
     @NamedSftp("bank-a")
     MutinySftpClient reactiveBankA;
+
+    /**
+     * The pool config must actually reach the pool, not merely bind: with max-size 1, holding
+     * bank-b's only session via a unit of work makes a second borrow time out.
+     */
+    @Test
+    void poolConfigReachesThePool() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                bankB.withSessionWithoutResult(held ->
+                        bankB.withSessionWithoutResult(second -> { })))
+                .hasMessageContaining("all 1 are in use");
+    }
 
     @Test
     void injectsADistinctClientPerConfiguredEndpoint() {
