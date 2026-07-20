@@ -140,8 +140,8 @@ public final class MicrometerReactiveSftpClient extends ForwardingReactiveSftpCl
      * subscribes — possibly much later, possibly never.
      */
     @Override
-    public Flow.Publisher<ByteBuffer> download(String remotePath) {
-        Flow.Publisher<ByteBuffer> source = client.download(remotePath);
+    public Flow.Publisher<ByteBuffer> download(String remotePath, long fromOffset) {
+        Flow.Publisher<ByteBuffer> source = client.download(remotePath, fromOffset);
         return subscriber -> {
             Timer.Sample sample = Timer.start(registry);
             new ByteCountingPublisher(source, bytes -> {
@@ -152,12 +152,15 @@ public final class MicrometerReactiveSftpClient extends ForwardingReactiveSftpCl
     }
 
     @Override
-    public CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data) {
-        long[] sent = {0};
-        Flow.Publisher<ByteBuffer> counted =
-            new ByteCountingPublisher(data, bytes -> sent[0] = bytes);
-        return timed("upload", () -> client.upload(remotePath, counted))
-            .whenComplete((ignored, failure) -> countBytes("upload", sent[0]));
+    public CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data,
+            io.github.jtsirogiannos.sftp.client.spi.SftpSession.WriteMode mode) {
+        // AtomicLong rather than a long[]: the counting callback and this whenComplete only have a
+        // happens-before edge when the provider orders its cancel against its stage completion,
+        // and nothing in the SPI requires that of third parties.
+        java.util.concurrent.atomic.AtomicLong sent = new java.util.concurrent.atomic.AtomicLong();
+        Flow.Publisher<ByteBuffer> counted = new ByteCountingPublisher(data, sent::set);
+        return timed("upload", () -> client.upload(remotePath, counted, mode))
+            .whenComplete((ignored, failure) -> countBytes("upload", sent.get()));
     }
 
     private <T> CompletionStage<T> timed(String operation, Supplier<CompletionStage<T>> work) {

@@ -117,14 +117,15 @@ public class AsyncReactiveSftpClient implements ReactiveSftpClient {
     }
 
     @Override
-    public Flow.Publisher<ByteBuffer> download(String remotePath) {
+    public Flow.Publisher<ByteBuffer> download(String remotePath, long fromOffset) {
         // Borrowed lazily on subscribe, so a publisher nobody subscribes to costs nothing.
-        return new AsyncDownloadPublisher(remotePath, 0, () -> pool.borrowAsync(worker),
+        return new AsyncDownloadPublisher(remotePath, fromOffset, () -> pool.borrowAsync(worker),
             pool::discard);
     }
 
     @Override
-    public CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data) {
+    public CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data,
+            SftpSession.WriteMode mode) {
         CompletableFuture<Void> result = new CompletableFuture<>();
         pool.borrowAsync(worker).whenComplete((session, borrowFailure) -> {
             if (borrowFailure != null) {
@@ -138,7 +139,7 @@ public class AsyncReactiveSftpClient implements ReactiveSftpClient {
                 return;
             }
             try {
-                session.writeAsync(remotePath, data, SftpSession.WriteMode.OVERWRITE)
+                session.writeAsync(remotePath, data, mode)
                     .whenComplete((ignored, failure) -> {
                         // Mid-transfer on every route, so the session never goes back to the pool.
                         pool.discard(session);

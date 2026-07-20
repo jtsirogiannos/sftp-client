@@ -126,10 +126,23 @@ public class MutinySftpClient implements AutoCloseable {
                 .map(MutinySftpClient::toVertxBuffer);
     }
 
+    /** As {@link #download(String)}, starting at {@code fromOffset} — the resume primitive. */
+    public Multi<Buffer> download(String remotePath, long fromOffset) {
+        return Multi.createFrom().publisher(delegate.download(remotePath, fromOffset))
+                .map(MutinySftpClient::toVertxBuffer);
+    }
+
     public Uni<Void> upload(String remotePath, Multi<Buffer> data) {
         // Multi IS a Flow.Publisher in Mutiny 2, so this hands straight through.
         return Uni.createFrom().completionStage(
                 () -> delegate.upload(remotePath, data.map(b -> ByteBuffer.wrap(b.getBytes()))));
+    }
+
+    /** As {@link #upload(String, Multi)}, with explicit write semantics. */
+    public Uni<Void> upload(String remotePath, Multi<Buffer> data,
+            io.github.jtsirogiannos.sftp.client.spi.SftpSession.WriteMode mode) {
+        return Uni.createFrom().completionStage(
+                () -> delegate.upload(remotePath, data.map(b -> ByteBuffer.wrap(b.getBytes())), mode));
     }
 
     /**

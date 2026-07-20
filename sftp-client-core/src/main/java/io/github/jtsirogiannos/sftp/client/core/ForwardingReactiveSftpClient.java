@@ -97,13 +97,14 @@ public abstract class ForwardingReactiveSftpClient implements ReactiveSftpClient
     }
 
     @Override
-    public Flow.Publisher<ByteBuffer> download(String remotePath) {
-        return delegate().download(remotePath);
+    public Flow.Publisher<ByteBuffer> download(String remotePath, long fromOffset) {
+        return delegate().download(remotePath, fromOffset);
     }
 
     @Override
-    public CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data) {
-        return delegate().upload(remotePath, data);
+    public CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data,
+            io.github.jtsirogiannos.sftp.client.spi.SftpSession.WriteMode mode) {
+        return delegate().upload(remotePath, data, mode);
     }
 
     @Override

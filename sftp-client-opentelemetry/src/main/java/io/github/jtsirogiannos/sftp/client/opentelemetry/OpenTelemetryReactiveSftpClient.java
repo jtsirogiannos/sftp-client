@@ -138,8 +138,8 @@ public final class OpenTelemetryReactiveSftpClient extends ForwardingReactiveSft
 
     /** The span covers the subscription: nothing is transferred until someone subscribes. */
     @Override
-    public Flow.Publisher<ByteBuffer> download(String remotePath) {
-        Flow.Publisher<ByteBuffer> source = client.download(remotePath);
+    public Flow.Publisher<ByteBuffer> download(String remotePath, long fromOffset) {
+        Flow.Publisher<ByteBuffer> source = client.download(remotePath, fromOffset);
         return subscriber -> {
             Span span = span("download", remotePath);
             new ByteCountingPublisher(source, bytes -> {
@@ -150,14 +150,16 @@ public final class OpenTelemetryReactiveSftpClient extends ForwardingReactiveSft
     }
 
     @Override
-    public CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data) {
+    public CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data,
+            io.github.jtsirogiannos.sftp.client.spi.SftpSession.WriteMode mode) {
         Span span = span("upload", remotePath);
-        long[] sent = {0};
-        Flow.Publisher<ByteBuffer> counted =
-            new ByteCountingPublisher(data, bytes -> sent[0] = bytes);
-        return client.upload(remotePath, counted).whenComplete((ignored, failure) -> {
+        // AtomicLong rather than a long[]: nothing in the SPI orders a third-party provider's
+        // cancel against its stage completion, and the pattern must not rely on it.
+        java.util.concurrent.atomic.AtomicLong sent = new java.util.concurrent.atomic.AtomicLong();
+        Flow.Publisher<ByteBuffer> counted = new ByteCountingPublisher(data, sent::set);
+        return client.upload(remotePath, counted, mode).whenComplete((ignored, failure) -> {
             // Set even on failure: how much landed before it broke is the interesting part.
-            span.setAttribute(SftpAttributes.FILE_SIZE, sent[0]);
+            span.setAttribute(SftpAttributes.FILE_SIZE, sent.get());
             finish(span, failure);
         });
     }

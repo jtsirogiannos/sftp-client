@@ -75,7 +75,15 @@ public interface ReactiveSftpClient extends AutoCloseable {
      *
      * <p>Buffers are handed off to the subscriber and not reused, so they are safe to retain.
      */
-    Flow.Publisher<ByteBuffer> download(String remotePath);
+    default Flow.Publisher<ByteBuffer> download(String remotePath) {
+        return download(remotePath, 0);
+    }
+
+    /**
+     * As {@link #download(String)}, starting at {@code fromOffset} — the resume primitive. Bytes
+     * before the offset are never transferred.
+     */
+    Flow.Publisher<ByteBuffer> download(String remotePath, long fromOffset);
 
     /**
      * Consumes {@code data} with backpressure and writes it to the remote path, completing when the
@@ -89,7 +97,17 @@ public interface ReactiveSftpClient extends AutoCloseable {
      * <p>One chunk may still land after cancelling: demand is one buffer at a time, and a write
      * already handed to the stream cannot be recalled. Nothing further is requested or written.
      */
-    CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data);
+    default CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data) {
+        return upload(remotePath, data, SftpSession.WriteMode.OVERWRITE);
+    }
+
+    /**
+     * As {@link #upload(String, Flow.Publisher)}, with explicit write semantics — {@code APPEND},
+     * or {@code CREATE_NEW} where {@link SftpCapabilities#atomicCreateNew()} allows it. The
+     * two-argument form overwrites.
+     */
+    CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data,
+            SftpSession.WriteMode mode);
 
     /**
      * Publishes by rename: uploads to a scratch name beside the destination and renames it into

@@ -161,8 +161,8 @@ class OpenTelemetryReactiveSftpClientTest {
         @Override public CompletionStage<Void> hardlink(String l, String t) { return delegate.hardlink(l, t); }
         @Override public CompletionStage<Void> setAttributes(String p, io.github.jtsirogiannos.sftp.client.api.AttributeUpdate u) { return delegate.setAttributes(p, u); }
         @Override public CompletionStage<io.github.jtsirogiannos.sftp.client.api.FilesystemStats> statvfs(String p) { return delegate.statvfs(p); }
-        @Override public Flow.Publisher<ByteBuffer> download(String p) { return delegate.download(p); }
-        @Override public CompletionStage<Void> upload(String p, Flow.Publisher<ByteBuffer> d) { return delegate.upload(p, d); }
+        @Override public Flow.Publisher<ByteBuffer> download(String p, long o) { return delegate.download(p, o); }
+        @Override public CompletionStage<Void> upload(String p, Flow.Publisher<ByteBuffer> d, io.github.jtsirogiannos.sftp.client.spi.SftpSession.WriteMode m) { return delegate.upload(p, d, m); }
         @Override public io.github.jtsirogiannos.sftp.client.spi.SftpCapabilities capabilities() { return delegate.capabilities(); }
         @Override public void close() { delegate.close(); }
     }

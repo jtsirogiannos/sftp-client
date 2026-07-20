@@ -119,7 +119,7 @@ public class DefaultReactiveSftpClient implements ReactiveSftpClient {
     }
 
     @Override
-    public Flow.Publisher<ByteBuffer> download(String remotePath) {
+    public Flow.Publisher<ByteBuffer> download(String remotePath, long fromOffset) {
         int chunk = provider.capabilities().pipelinedStreaming() ? PIPELINED_CHUNK : STOP_AND_WAIT_CHUNK;
         // Borrowed lazily inside the supplier so nothing leaks if the publisher is never subscribed.
         SessionHolder holder = new SessionHolder();
@@ -127,7 +127,7 @@ public class DefaultReactiveSftpClient implements ReactiveSftpClient {
             () -> {
                 SftpSession session = pool.borrow();
                 holder.session = session;
-                return session.openRead(remotePath);
+                return session.openRead(remotePath, fromOffset);
             },
             chunk,
             worker,
@@ -140,7 +140,8 @@ public class DefaultReactiveSftpClient implements ReactiveSftpClient {
     }
 
     @Override
-    public CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data) {
+    public CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data,
+            SftpSession.WriteMode mode) {
         CompletableFuture<Void> result = new CompletableFuture<>();
         worker.execute(() -> {
             if (result.isDone()) {
@@ -152,7 +153,7 @@ public class DefaultReactiveSftpClient implements ReactiveSftpClient {
             OutputStream out;
             try {
                 session = pool.borrow();
-                out = session.openWrite(remotePath, SftpSession.WriteMode.OVERWRITE);
+                out = session.openWrite(remotePath, mode);
             } catch (RuntimeException e) {
                 result.completeExceptionally(e);
                 return;

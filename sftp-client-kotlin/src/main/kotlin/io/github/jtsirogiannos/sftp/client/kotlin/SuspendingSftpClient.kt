@@ -5,6 +5,7 @@ import io.github.jtsirogiannos.sftp.client.api.FilesystemStats
 import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClient
 import io.github.jtsirogiannos.sftp.client.api.RemoteFile
 import io.github.jtsirogiannos.sftp.client.spi.SftpCapabilities
+import io.github.jtsirogiannos.sftp.client.spi.SftpSession
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.future.await
 import kotlinx.coroutines.jdk9.asFlow
@@ -115,9 +116,18 @@ class SuspendingSftpClient(
      */
     fun download(remotePath: String): Flow<ByteBuffer> = delegate.download(remotePath).asFlow()
 
+    /** As [download], starting at [fromOffset] — the resume primitive. */
+    fun download(remotePath: String, fromOffset: Long): Flow<ByteBuffer> =
+        delegate.download(remotePath, fromOffset).asFlow()
+
     /** Consumes [data] with backpressure and writes it, returning when the final flush lands. */
     suspend fun upload(remotePath: String, data: Flow<ByteBuffer>) {
         delegate.upload(remotePath, data.asPublisher()).await()
+    }
+
+    /** As [upload], with explicit write semantics — APPEND, or CREATE_NEW where supported. */
+    suspend fun upload(remotePath: String, data: Flow<ByteBuffer>, mode: SftpSession.WriteMode) {
+        delegate.upload(remotePath, data.asPublisher(), mode).await()
     }
 
     /**

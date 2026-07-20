@@ -101,7 +101,8 @@ public class ReactiveAtomicUploadFailureTest {
         RuntimeException removeFailure;
 
         @Override
-        public CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data) {
+        public CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data,
+                io.github.jtsirogiannos.sftp.client.spi.SftpSession.WriteMode mode) {
             return uploadFailure == null
                 ? CompletableFuture.completedFuture(null)
                 // Through a dependent stage, so the failure arrives wrapped in a
@@ -187,7 +188,7 @@ public class ReactiveAtomicUploadFailureTest {
         }
 
         @Override
-        public Flow.Publisher<ByteBuffer> download(String remotePath) {
+        public Flow.Publisher<ByteBuffer> download(String remotePath, long fromOffset) {
             throw new UnsupportedOperationException();
         }
 
