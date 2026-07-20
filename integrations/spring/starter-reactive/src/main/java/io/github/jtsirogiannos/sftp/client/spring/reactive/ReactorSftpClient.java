@@ -1,7 +1,10 @@
 package io.github.jtsirogiannos.sftp.client.spring.reactive;
 
+import io.github.jtsirogiannos.sftp.client.api.AttributeUpdate;
+import io.github.jtsirogiannos.sftp.client.api.FilesystemStats;
 import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClient;
 import io.github.jtsirogiannos.sftp.client.api.RemoteFile;
+import io.github.jtsirogiannos.sftp.client.spi.SftpSession;
 import io.github.jtsirogiannos.sftp.client.spi.SftpCapabilities;
 
 import org.reactivestreams.FlowAdapters;
@@ -11,6 +14,7 @@ import reactor.core.publisher.Mono;
 
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.function.Predicate;
 
 /**
  * Reactor view of the neutral {@link ReactiveSftpClient}, for WebFlux applications.
@@ -47,6 +51,15 @@ public class ReactorSftpClient implements AutoCloseable {
         this.delegate = delegate;
     }
 
+    /**
+     * The neutral client underneath, exposed because this wrapper is maintained by hand and lags
+     * behind whenever the neutral client grows — it once lagged by thirteen operations. The escape
+     * hatch keeps that a nuisance rather than a wall.
+     */
+    public ReactiveSftpClient unwrap() {
+        return delegate;
+    }
+
     public Mono<List<RemoteFile>> list(String path) {
         return Mono.fromCompletionStage(() -> delegate.list(path));
     }
@@ -71,15 +84,91 @@ public class ReactorSftpClient implements AutoCloseable {
         return Mono.fromCompletionStage(() -> delegate.remove(path));
     }
 
+    /** Attributes without following symlinks — what a tree walk must use. */
+    public Mono<RemoteFile> lstat(String path) {
+        return Mono.fromCompletionStage(() -> delegate.lstat(path));
+    }
+
+    public Mono<String> realpath(String path) {
+        return Mono.fromCompletionStage(() -> delegate.realpath(path));
+    }
+
+    public Mono<Void> symlink(String linkPath, String targetPath) {
+        return Mono.fromCompletionStage(() -> delegate.symlink(linkPath, targetPath));
+    }
+
+    public Mono<String> readlink(String linkPath) {
+        return Mono.fromCompletionStage(() -> delegate.readlink(linkPath));
+    }
+
+    public Mono<Void> hardlink(String linkPath, String targetPath) {
+        return Mono.fromCompletionStage(() -> delegate.hardlink(linkPath, targetPath));
+    }
+
+    public Mono<Void> setAttributes(String path, AttributeUpdate update) {
+        return Mono.fromCompletionStage(() -> delegate.setAttributes(path, update));
+    }
+
+    public Mono<FilesystemStats> statvfs(String path) {
+        return Mono.fromCompletionStage(() -> delegate.statvfs(path));
+    }
+
+    /** {@code mkdir -p}. An existing chain is not an error. */
+    public Mono<Void> mkdirs(String path) {
+        return Mono.fromCompletionStage(() -> delegate.mkdirs(path));
+    }
+
+    /** Deletes a tree, removing symlinks as links, never following them. */
+    public Mono<Integer> deleteRecursively(String path) {
+        return Mono.fromCompletionStage(() -> delegate.deleteRecursively(path));
+    }
+
+    public Mono<Void> chmod(String path, int mode) {
+        return Mono.fromCompletionStage(() -> delegate.chmod(path, mode));
+    }
+
+    /** Directory entries matching {@code filter}, filtered client-side. */
+    public Mono<List<RemoteFile>> list(String path, Predicate<RemoteFile> filter) {
+        return Mono.fromCompletionStage(() -> delegate.list(path, filter));
+    }
+
+    /** The first entry matching {@code match}; empty when nothing does. */
+    public Mono<RemoteFile> findFirst(String path, Predicate<RemoteFile> match) {
+        return Mono.fromCompletionStage(() -> delegate.findFirst(path, match))
+                .flatMap(found -> Mono.justOrEmpty(found));
+    }
+
     /** Backpressured chunks. Cancelling the subscription abandons the transfer and its session. */
     public Flux<ByteBuffer> download(String remotePath) {
         return Flux.from(FlowAdapters.toPublisher(delegate.download(remotePath)));
+    }
+
+    /** As {@link #download(String)}, starting at {@code fromOffset} — the resume primitive. */
+    public Flux<ByteBuffer> download(String remotePath, long fromOffset) {
+        return Flux.from(FlowAdapters.toPublisher(delegate.download(remotePath, fromOffset)));
     }
 
     /** Consumes {@code data} with backpressure; completes when the upload has landed. */
     public Mono<Void> upload(String remotePath, Publisher<ByteBuffer> data) {
         return Mono.fromCompletionStage(
                 () -> delegate.upload(remotePath, FlowAdapters.toFlowPublisher(data)));
+    }
+
+    /** As {@link #upload(String, Publisher)}, with explicit write semantics. */
+    public Mono<Void> upload(String remotePath, Publisher<ByteBuffer> data,
+            SftpSession.WriteMode mode) {
+        return Mono.fromCompletionStage(
+                () -> delegate.upload(remotePath, FlowAdapters.toFlowPublisher(data), mode));
+    }
+
+    /**
+     * Publishes by rename, so a reader watching the destination never sees a partial file.
+     * Replacing an existing file needs SFTP v5+ rename semantics and fails on a v3 server rather
+     * than degrading.
+     */
+    public Mono<Void> uploadAtomically(String remotePath, Publisher<ByteBuffer> data) {
+        return Mono.fromCompletionStage(
+                () -> delegate.uploadAtomically(remotePath, FlowAdapters.toFlowPublisher(data)));
     }
 
     public SftpCapabilities capabilities() {
