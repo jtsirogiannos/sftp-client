@@ -118,7 +118,8 @@ Now the extension is a thin adapter, not the product.
 - `runtime`: the `@ConfigMapping` named-endpoint config and `@NamedSftp` qualifier already drafted,
   plus a recorder producing clients; and the Mutiny edge adapter wrapping the core's `Publisher`.
 - `deployment`: synthetic beans per named endpoint, build-time provider resolution (fail the *build*,
-  not the first request, when a configured provider is missing), dev services, health check.
+  not the first request, when a configured provider is missing), and Dev Services (done — see below).
+  A health check is still open.
 - **Bring-your-own-driver split**, mirroring the JDBC starter shape — the user adds two artifacts:
   - `quarkus-sftp-client` (core adapter)
   - `quarkus-sftp-client-jsch` **or** `quarkus-sftp-client-mina`
@@ -323,22 +324,26 @@ Spans would use `server.address`, `server.port` and a `network.protocol.name` of
 the rest, so the attribute names are a guess that may need to change later. Say so in the module
 rather than implying conformance.
 
-### Quarkus Dev Services
+### Quarkus Dev Services — shipped
 
-In dev and test mode, start an SFTP container automatically when an endpoint is declared but has no
-host configured, and inject `host`/`port`/`username`/`password` — exactly what the datasource
-extension does with Postgres. The pieces already exist: the TCK's `OpenSshSftpServer` runs
-`atmoz/sftp` under Testcontainers, and that is the container this would start.
+In dev and test mode, an endpoint declared without a host gets a throwaway `atmoz/sftp` container
+and has its `host`/`port`/`username`/`password` wired in — exactly what the datasource extension does
+with Postgres. `SftpDevServicesProcessor` in the deployment module, configured under
+`quarkus.sftp-client.devservices.*`, gated to non-production by `onlyIfNot = IsNormal`.
 
-Two things to work through:
+How the two open questions resolved:
 
-- The extension discovers endpoint **names** during augmentation. Dev Services supplies values at
-  runtime, so a partially-configured endpoint has to survive the build with a placeholder host —
-  the same wrinkle the integration-tests application works around today with a fixed port in
-  `application.properties`.
-- A container is not the only sensible default. `sftp-provider-inmemory` needs no Docker at all and
-  starts in milliseconds; for many dev loops that is the better zero-config experience. Possibly
-  both, with the in-memory one as the default and a container behind a flag.
+- **The mandatory host.** The container's address is contributed as a `DevServicesResultBuildItem`
+  config source, which is precisely the config that satisfies the otherwise-required
+  `SftpRuntimeConfig.host()` — no placeholder needed. The endpoint's configured username/password are
+  honoured when present (so the container is created with the right credentials) and defaulted to
+  `sftp`/`sftp` otherwise.
+- **Container vs in-memory default.** Settled on the container. In-memory looked cheaper but is not
+  symmetric: it runs in-process with no host to point at, so it would mean *overriding the endpoint's
+  provider* to `inmemory` in dev — the developer would then exercise a different backend than
+  production, against the project's whole "a fake agrees with whatever the code believes" ethos. The
+  container keeps the real provider and the real code path; the only cost is Docker, which the build
+  detects and degrades to a clear warning without.
 
 ### An async network provider
 

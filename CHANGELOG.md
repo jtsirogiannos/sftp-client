@@ -21,6 +21,9 @@ Nothing has been published to Maven Central. The API is still free to change.
 - `sftp-client-tck`: a conformance suite every provider passes, run against an embedded MINA server
   and an OpenSSH container.
 - Quarkus extension and three Spring Boot starters (core, blocking, reactive).
+- Quarkus Dev Services: in dev and test, an endpoint declared without a host gets a throwaway
+  `atmoz/sftp` container with its address and credentials wired in, keeping the endpoint's real
+  provider. Configured under `quarkus.sftp-client.devservices.*`; never runs in production.
 - Kotlin coroutine support in `sftp-client-kotlin`.
 - Streaming directory listing, symlink and hard-link operations, `statvfs`, and the full set of
   filexfer operations the drafts define.

@@ -41,6 +41,17 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-vertx-deployment</artifactId>
         </dependency>
+        <!--
+          Dev Services starts an SFTP container in dev and test mode. Testcontainers runs only during
+          augmentation, on the deployment classpath, so this never reaches a production application -
+          deployment artifacts are build-time only. Same GAV the TCK's OpenSshSftpServer already uses,
+          so the version is managed centrally and the enforcer keeps it converged.
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>${testcontainers.version}</version>
+        </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit-internal</artifactId> <!-- renamed from quarkus-junit5-internal in Quarkus 3.31 -->

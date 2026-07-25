@@ -143,6 +143,14 @@ Quarkus — add `quarkus-sftp-client-mina` (or `-jsch`) and inject:
 @Inject @NamedSftp("bank-a") MutinySftpClient client;
 ```
 
+**In dev and test, an endpoint with no host gets one.** Declare `sftp.endpoints.reports.username=…`
+without a host and Dev Services starts an `atmoz/sftp` container, wiring its address and credentials
+in. The endpoint keeps its real provider, so you develop against a real SFTP server rather than a
+fake — the same reason the datasource extension starts a database. It needs Docker, never runs in
+production (`%prod` skips it entirely), and switches off with
+`quarkus.sftp-client.devservices.enabled=false`. Giving an endpoint a host disables it for that
+endpoint.
+
 Spring Boot — pick the starter that matches your application type, then configure
 `sftp.endpoints.bank-a.*`:
 
@@ -360,8 +368,7 @@ binary.
 - No retry or backoff on transient failures, and no health checks. Metrics and tracing cover both
   facades (`sftp-client-micrometer`, `sftp-client-opentelemetry`), but the tracing module's file
   attributes are experimental because **no OpenTelemetry semantic convention for file transfer
-  exists** — see its `SftpAttributes`. Quarkus Dev Services is written up in
-  [ROADMAP.md](ROADMAP.md) under "Backlog" with the design question to settle first.
+  exists** — see its `SftpAttributes`.
 - The reactive facade lacks `visit` and the `java.nio.file.Path` transfers, deliberately. `visit`
   needs a streaming listing to be worth having (its blocking form stops the walk early, which
   `CompletionStage<List<..>>` cannot express), and `Path` transfers would put blocking file I/O
