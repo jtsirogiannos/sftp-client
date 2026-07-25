@@ -7,6 +7,7 @@ import io.github.jtsirogiannos.sftp.client.spi.SftpProvider;
 import io.github.jtsirogiannos.sftp.client.spi.SftpSession;
 
 import org.apache.sshd.client.SshClient;
+import org.apache.sshd.client.config.hosts.HostConfigEntryResolver;
 import org.apache.sshd.client.keyverifier.AcceptAllServerKeyVerifier;
 import org.apache.sshd.client.keyverifier.KnownHostsServerKeyVerifier;
 import org.apache.sshd.client.keyverifier.RejectAllServerKeyVerifier;
@@ -81,16 +82,8 @@ public final class MinaSftpProvider implements SftpProvider {
      */
     @Override
     public SftpSession connect(SftpConnectionConfig config) {
-        SshClient client = SshClient.setUpDefaultClient();
+        SshClient client = harden(SshClient.setUpDefaultClient());
         client.setServerKeyVerifier(verifierFor(config));
-        // Use only the credentials we were handed. setUpDefaultClient() installs a watcher that
-        // loads ~/.ssh identities and offers them during authentication, which is wrong for a
-        // library on three counts: it authenticates with keys the caller never configured, it tells
-        // the remote server which keys exist on this host, and each rejected key spends one of the
-        // server's limited auth attempts — enough of them and the server closes the session, which
-        // showed up here as an intermittent "Session is being closed" on a perfectly valid password
-        // login.
-        client.setKeyIdentityProvider(KeyIdentityProvider.EMPTY_KEYS_PROVIDER);
         client.start();
 
         ClientSession session = null;
@@ -120,6 +113,35 @@ public final class MinaSftpProvider implements SftpProvider {
             throw new SftpException("could not connect to " + config.username() + "@"
                     + config.host() + ":" + config.port(), e);
         }
+    }
+
+    /**
+     * Strips a default MINA client of everything it would otherwise inherit from the developer's SSH
+     * environment, so a session connects to exactly what {@link SftpConnectionConfig} says and nothing
+     * else. Package-private and returns the client so the connect path stays a one-liner and a test
+     * can assert both guarantees without opening a socket.
+     *
+     * <p>Two inheritances are removed, for the same reason — a library must be hermetic:
+     * <ul>
+     *   <li><strong>~/.ssh identities.</strong> {@code setUpDefaultClient()} installs a watcher that
+     *       loads local private keys and offers them during authentication. That authenticates with
+     *       keys the caller never configured, advertises which keys exist on this host, and spends the
+     *       server's limited auth attempts one rejected key at a time — enough of them and the server
+     *       closes the session, which showed up as an intermittent "Session is being closed" on a
+     *       perfectly valid password login.</li>
+     *   <li><strong>~/.ssh/config.</strong> The default resolver reads that file on the first connect.
+     *       An OpenSSH client config can silently rewrite the host, change the username, or route
+     *       through a {@code ProxyJump} the caller never asked for, so a config addressed to
+     *       "sftp.example.com" would quietly connect somewhere else. It also crashes outright on a
+     *       {@code Match} section — "StreamCorruptedException: Currently not able to process Match
+     *       sections" — which surfaced as an intermittent connect failure (intermittent only because
+     *       MINA caches the failed parse, so only the first connect in the JVM threw).</li>
+     * </ul>
+     */
+    static SshClient harden(SshClient client) {
+        client.setKeyIdentityProvider(KeyIdentityProvider.EMPTY_KEYS_PROVIDER);
+        client.setHostConfigEntryResolver(HostConfigEntryResolver.EMPTY);
+        return client;
     }
 
     /** Key takes precedence over password when both are configured, matching the config record's docs. */

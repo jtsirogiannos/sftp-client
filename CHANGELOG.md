@@ -79,6 +79,12 @@ Nothing has been published to Maven Central. The API is still free to change.
 - `remove()` could not delete directories in either network provider; the fakes hid it.
 - `deleteRecursively` followed symlinks because it used `stat` rather than `lstat`.
 - MINA offered ambient `~/.ssh` identities, causing intermittent authentication failures.
+- MINA also read the developer's `~/.ssh/config`, so a client addressed to one host could be
+  silently rewritten to another, and a `Match` section crashed `connect()` outright
+  (`StreamCorruptedException: Currently not able to process Match sections`) — which had been
+  misread as a Quarkus/SmallRye incompatibility. The provider now installs `HostConfigEntryResolver.EMPTY`
+  alongside the empty identity provider, so a session connects to exactly what `SftpConnectionConfig`
+  says and nothing the local environment supplies.
 - The embedded test server bound to a port that another process could already hold on loopback,
   making the conformance suite fail roughly one connect in eight hundred.
   See [ADR 0005](docs/adr/0005-test-server-binds-below-ephemeral-range.md).
