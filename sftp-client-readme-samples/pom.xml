@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.github.jtsirogiannos</groupId>
+        <artifactId>sftp-client-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>sftp-client-readme-samples</artifactId>
+    <name>SFTP Client :: README Samples</name>
+    <description>
+        Compiles every Java snippet in the root README, so renaming an API breaks the build rather
+        than the documentation. Test-only; not published.
+    </description>
+
+    <properties>
+        <maven.deploy.skip>true</maven.deploy.skip>
+        <maven.install.skip>true</maven.install.skip>
+    </properties>
+
+    <!--
+      Why this module exists.
+
+      The README's code samples drift silently: they are prose, so nothing compiles them, and twice
+      already a facade method was renamed while the README kept calling the old name — most recently
+      when the pool-tuning and observability snippets went in. This module closes that gap cheaply.
+
+      ReadmeSamples mirrors every Java snippet as real, compiled code, so an API rename fails
+      test-compile here. ReadmeSamplesInSyncTest reads the README back and asserts every Java line it
+      contains is present in the mirror, so editing a snippet without updating the mirror fails too.
+      Together they make "the README compiles and says what the mirror proves" a build invariant.
+
+      The Kotlin snippets are covered by the Kotlin module's own parity tripwire, and the two
+      framework-annotation fragments (@Inject/@NamedSftp, @Qualifier) are deliberately skipped rather
+      than drag Quarkus and Spring onto this classpath — the in-sync test records that skip out loud
+      instead of quietly ignoring them.
+
+      It depends on the observability modules because the README does; those transitively bring core,
+      the api and their third-party types. Sources live under src/test so nothing here is packaged.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>sftp-client-core</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>sftp-client-micrometer</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>sftp-client-opentelemetry</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

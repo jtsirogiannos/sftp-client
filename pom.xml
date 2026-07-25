@@ -78,6 +78,7 @@
     <module>sftp-client-micrometer</module>
     <module>sftp-client-opentelemetry</module>
     <module>sftp-client-integration-tests</module>
+    <module>sftp-client-readme-samples</module>
     <module>integrations/quarkus</module>
     <module>integrations/spring/autoconfigure</module>
     <module>integrations/spring/starter</module>
