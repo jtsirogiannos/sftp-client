@@ -73,14 +73,15 @@ class SftpClientExtensionTest {
 
     /**
      * The pool config must actually reach the pool, not merely bind: with max-size 1, holding
-     * bank-b's only session via a unit of work makes a second borrow time out.
+     * bank-b's only connection makes a second one time out. Two openSession calls rather than
+     * nested withSession blocks, which now share one connection.
      */
     @Test
     void poolConfigReachesThePool() {
-        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                bankB.withSessionWithoutResult(held ->
-                        bankB.withSessionWithoutResult(second -> { })))
-                .hasMessageContaining("all 1 are in use");
+        try (var held = bankB.openSession()) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(bankB::openSession)
+                    .hasMessageContaining("all 1 are in use");
+        }
     }
 
     @Test

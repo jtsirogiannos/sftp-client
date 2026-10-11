@@ -71,10 +71,12 @@ class SftpClientAutoConfigurationTest {
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     SftpClient client = context.getBean("sftpClient-bank-a", SftpClient.class);
-                    // Hold the only session via a unit of work; a second one must time out.
-                    assertThatThrownBy(() -> client.withSessionWithoutResult(held ->
-                            client.withSessionWithoutResult(second -> { })))
-                            .hasMessageContaining("all 1 are in use");
+                    // Hold the only connection; a second one must time out. Two openSession calls
+                    // rather than nested withSession blocks, which now share one connection.
+                    try (var held = client.openSession()) {
+                        assertThatThrownBy(client::openSession)
+                                .hasMessageContaining("all 1 are in use");
+                    }
                 });
     }
 

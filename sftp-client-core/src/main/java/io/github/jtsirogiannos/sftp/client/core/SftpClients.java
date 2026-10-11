@@ -4,6 +4,7 @@ import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClient;
 import io.github.jtsirogiannos.sftp.client.api.SftpClient;
 import io.github.jtsirogiannos.sftp.client.api.SftpConnectionConfig;
 import io.github.jtsirogiannos.sftp.client.api.SftpException;
+import io.github.jtsirogiannos.sftp.client.context.SftpSessionContext;
 import io.github.jtsirogiannos.sftp.client.pool.BoundedSftpSessionPool;
 import io.github.jtsirogiannos.sftp.client.pool.PoolSettings;
 import io.github.jtsirogiannos.sftp.client.spi.AsyncSftpProvider;
@@ -13,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.ServiceLoader;
 import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
@@ -60,6 +62,21 @@ public final class SftpClients {
                 null));
     }
 
+    /**
+     * Everything a client can be configured with, for when the shortcuts below are not enough.
+     *
+     * <pre>{@code
+     * SftpClient client = SftpClients.builder("mina")
+     *         .config(config)
+     *         .pool(PoolSettings.defaults().withMaxSize(24))
+     *         .sessionContext(myContext)
+     *         .blocking();
+     * }</pre>
+     */
+    public static Builder builder(String providerName) {
+        return new Builder(providerName);
+    }
+
     public static SftpClient blocking(String providerName, SftpConnectionConfig config) {
         return blocking(providerName, config, PoolSettings.defaults());
     }
@@ -67,11 +84,7 @@ public final class SftpClients {
     /** As {@link #blocking(String, SftpConnectionConfig)}, with the pool tuned rather than default. */
     public static SftpClient blocking(String providerName, SftpConnectionConfig config,
             PoolSettings pool) {
-        SftpProvider provider = provider(providerName);
-        log.debug("Creating a blocking client for {} using provider '{}' (available: {})", config,
-                providerName, availableProviders());
-        return new DefaultSftpClient(provider, BoundedSftpSessionPool.blocking(provider, config,
-                pool.maxSize(), pool.maxIdle(), pool.acquireTimeout()));
+        return builder(providerName).config(config).pool(pool).blocking();
     }
 
     /**
@@ -91,6 +104,11 @@ public final class SftpClients {
     /** As {@link #reactive(String, SftpConnectionConfig, Executor)}, with the pool tuned. */
     public static ReactiveSftpClient reactive(String providerName, SftpConnectionConfig config,
                                               Executor worker, PoolSettings pool) {
+        return builder(providerName).config(config).pool(pool).reactive(worker);
+    }
+
+    private static ReactiveSftpClient buildReactive(String providerName, SftpConnectionConfig config,
+            Executor worker, PoolSettings pool) {
         SftpProvider provider = provider(providerName);
         if (provider instanceof AsyncSftpProvider asyncProvider) {
             log.debug("Creating an async reactive client for {} using provider '{}'", config,
@@ -103,5 +121,61 @@ public final class SftpClients {
         return new DefaultReactiveSftpClient(provider,
             BoundedSftpSessionPool.blocking(provider, config, pool.maxSize(), pool.maxIdle(),
                 pool.acquireTimeout()), worker);
+    }
+
+    /**
+     * Collects a client's configuration. Mutable and not thread-safe; one per client.
+     *
+     * <p>Only the connection config is required. The pool defaults to {@link PoolSettings#defaults()}
+     * and the session context to {@link ThreadLocalSftpSessionContext}, which is right for blocking
+     * code; a framework whose requests hop threads supplies its own.
+     */
+    public static final class Builder {
+
+        private final String providerName;
+        private SftpConnectionConfig config;
+        private PoolSettings pool = PoolSettings.defaults();
+        private SftpSessionContext sessionContext = ThreadLocalSftpSessionContext.instance();
+
+        private Builder(String providerName) {
+            this.providerName = Objects.requireNonNull(providerName, "providerName");
+        }
+
+        public Builder config(SftpConnectionConfig config) {
+            this.config = Objects.requireNonNull(config, "config");
+            return this;
+        }
+
+        public Builder pool(PoolSettings pool) {
+            this.pool = Objects.requireNonNull(pool, "pool");
+            return this;
+        }
+
+        /** Where the client looks for, and {@code withSession} records, the current session. */
+        public Builder sessionContext(SftpSessionContext sessionContext) {
+            this.sessionContext = Objects.requireNonNull(sessionContext, "sessionContext");
+            return this;
+        }
+
+        public SftpClient blocking() {
+            SftpConnectionConfig config = requireConfig();
+            SftpProvider provider = provider(providerName);
+            log.debug("Creating a blocking client for {} using provider '{}' (available: {})", config,
+                    providerName, availableProviders());
+            return new DefaultSftpClient(provider, BoundedSftpSessionPool.blocking(provider, config,
+                    pool.maxSize(), pool.maxIdle(), pool.acquireTimeout()), sessionContext);
+        }
+
+        public ReactiveSftpClient reactive(Executor worker) {
+            return buildReactive(providerName, requireConfig(), Objects.requireNonNull(worker, "worker"),
+                    pool);
+        }
+
+        private SftpConnectionConfig requireConfig() {
+            if (config == null) {
+                throw new IllegalStateException("no connection config: call config(...) before building");
+            }
+            return config;
+        }
     }
 }

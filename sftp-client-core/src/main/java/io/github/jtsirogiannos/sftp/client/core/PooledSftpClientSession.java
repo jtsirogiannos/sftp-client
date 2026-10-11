@@ -208,6 +208,15 @@ final class PooledSftpClientSession implements SftpClientSession {
     }
 
     /**
+     * Whether a call routed from the client may go over this session now: open, vouched for by the
+     * provider, and not in the middle of a read. Read from whichever thread is routing, which is why
+     * every input to it is safe to read across threads.
+     */
+    boolean acceptsCalls() {
+        return !released.get() && openStreams.get() == 0 && session.isValid();
+    }
+
+    /**
      * The session, if this handle may still use it.
      *
      * <p>The open-stream rule is enforced rather than documented because breaking it does not fail —

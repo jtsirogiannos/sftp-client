@@ -115,6 +115,12 @@ public final class MicrometerSftpClient extends ForwardingSftpOperations impleme
         };
     }
 
+    /** The wrapped client's: a decorator observes sessions, it does not decide where they live. */
+    @Override
+    public io.github.jtsirogiannos.sftp.client.context.SftpSessionContext sessionContext() {
+        return client.sessionContext();
+    }
+
     @Override
     public void close() {
         client.close();
