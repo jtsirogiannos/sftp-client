@@ -54,7 +54,7 @@ public final class ObservedProvider implements SftpProvider {
 
     @Override
     public SftpSession connect(SftpConnectionConfig config) {
-        Observed observed = new Observed(real.connect(config));
+        Observed observed = new Observed(real.connect(config), config.username());
         sessions.add(observed);
         return observed.proxy;
     }
@@ -68,11 +68,14 @@ public final class ObservedProvider implements SftpProvider {
 
         final SftpSession real;
         final SftpSession proxy;
+        /** Which account the session was opened as — how a test tells tenants' connections apart. */
+        public final String username;
         public volatile boolean broken;
         public volatile boolean closed;
 
-        Observed(SftpSession real) {
+        Observed(SftpSession real, String username) {
             this.real = real;
+            this.username = username;
             this.proxy = (SftpSession) Proxy.newProxyInstance(SftpSession.class.getClassLoader(),
                     new Class<?>[] {SftpSession.class}, this::invoke);
         }

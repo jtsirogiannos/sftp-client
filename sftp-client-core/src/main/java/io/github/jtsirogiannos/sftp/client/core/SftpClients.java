@@ -77,6 +77,37 @@ public final class SftpClients {
         return new Builder(providerName);
     }
 
+    /**
+     * A client for many tenants, each on a connection of its own.
+     *
+     * <pre>{@code
+     * MultiTenantSftpClient sftp = SftpClients.multiTenant("mina")
+     *         .tenants((tenant, base) -> SftpTenant.connection(vault.configFor(tenant)))
+     *         .build();
+     * }</pre>
+     */
+    public static io.github.jtsirogiannos.sftp.client.tenancy.MultiTenantSftpClientBuilder multiTenant(
+            String providerName) {
+        return io.github.jtsirogiannos.sftp.client.tenancy.MultiTenantSftpClientBuilder.create(
+                provider(providerName), null);
+    }
+
+    /**
+     * A client for many tenants sharing {@code sharedConfig}'s connection, each confined to a
+     * directory — or, tenant by tenant, given a connection of its own.
+     *
+     * <pre>{@code
+     * MultiTenantSftpClient sftp = SftpClients.multiTenant("mina", sharedConfig)
+     *         .tenants(SftpTenantProvider.rootDirectoryTemplate("/tenants/{tenant}"))
+     *         .build();
+     * }</pre>
+     */
+    public static io.github.jtsirogiannos.sftp.client.tenancy.MultiTenantSftpClientBuilder multiTenant(
+            String providerName, SftpConnectionConfig sharedConfig) {
+        return io.github.jtsirogiannos.sftp.client.tenancy.MultiTenantSftpClientBuilder.create(
+                provider(providerName), java.util.Objects.requireNonNull(sharedConfig, "sharedConfig"));
+    }
+
     public static SftpClient blocking(String providerName, SftpConnectionConfig config) {
         return blocking(providerName, config, PoolSettings.defaults());
     }
