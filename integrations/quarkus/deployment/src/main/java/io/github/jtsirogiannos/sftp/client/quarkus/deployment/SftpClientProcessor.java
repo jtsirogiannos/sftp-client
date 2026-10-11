@@ -1,17 +1,21 @@
 package io.github.jtsirogiannos.sftp.client.quarkus.deployment;
 
+import io.github.jtsirogiannos.sftp.client.api.MultiTenantSftpClient;
 import io.github.jtsirogiannos.sftp.client.api.SftpClient;
+import io.github.jtsirogiannos.sftp.client.api.TenantResolver;
 import io.github.jtsirogiannos.sftp.client.api.WithSftpSession;
 import io.github.jtsirogiannos.sftp.client.quarkus.runtime.MutinySftpClient;
 import io.github.jtsirogiannos.sftp.client.quarkus.runtime.NamedSftp;
 import io.github.jtsirogiannos.sftp.client.quarkus.runtime.SftpClientRecorder;
 import io.github.jtsirogiannos.sftp.client.quarkus.runtime.WithSftpSessionInterceptor;
 import io.github.jtsirogiannos.sftp.client.spi.SftpProvider;
+import io.github.jtsirogiannos.sftp.client.tenancy.SftpTenantProvider;
 
 import io.quarkus.arc.BeanDestroyer;
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.InterceptorBindingRegistrarBuildItem;
 import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
+import io.quarkus.arc.deployment.UnremovableBeanBuildItem;
 import io.quarkus.arc.deployment.ValidationPhaseBuildItem;
 import io.quarkus.arc.processor.InterceptorBindingRegistrar;
 import io.quarkus.deployment.annotations.BuildProducer;
@@ -269,12 +273,18 @@ class SftpClientProcessor {
         boolean single = endpoints.size() == 1;
 
         endpoints.forEach((name, provider) -> {
-            var blocking = SyntheticBeanBuildItem.configure(SftpClient.class)
+            boolean tenancy = tenancyEnabled(name);
+            // A multi-tenant endpoint's bean is a MultiTenantSftpClient, injectable as either type.
+            var blocking = (tenancy
+                    ? SyntheticBeanBuildItem.configure(MultiTenantSftpClient.class)
+                            .types(MultiTenantSftpClient.class, SftpClient.class)
+                            .createWith(recorder.multiTenantClient(name, provider))
+                    : SyntheticBeanBuildItem.configure(SftpClient.class)
+                            .createWith(recorder.blockingClient(name, provider)))
                     .scope(ApplicationScoped.class)
                     .addQualifier(namedSftp(name))
                     .setRuntimeInit()
                     .unremovable()
-                    .createWith(recorder.blockingClient(name, provider))
                     .destroyer(BeanDestroyer.AutoCloseableDestroyer.class);
             if (single) {
                 blocking.addQualifier(DEFAULT_QUALIFIER);
@@ -286,13 +296,61 @@ class SftpClientProcessor {
                     .addQualifier(namedSftp(name))
                     .setRuntimeInit()
                     .unremovable()
-                    .createWith(recorder.mutinyClient(name, provider, executor.getExecutorProxy()))
+                    .createWith(tenancy
+                            ? recorder.multiTenantMutinyClient(name, provider, executor.getExecutorProxy())
+                            : recorder.mutinyClient(name, provider, executor.getExecutorProxy()))
                     .destroyer(BeanDestroyer.AutoCloseableDestroyer.class);
             if (single) {
                 mutiny.addQualifier(DEFAULT_QUALIFIER);
             }
             syntheticBeans.produce(mutiny.done());
         });
+    }
+
+    /**
+     * Read during augmentation, like the provider: whether an endpoint is multi-tenant decides its
+     * beans' types, so it cannot wait for run time.
+     */
+    private static boolean tenancyEnabled(String endpoint) {
+        return ConfigProvider.getConfig()
+                .getOptionalValue(ENDPOINT_PREFIX + endpoint + ".tenancy.enabled", Boolean.class)
+                .orElse(false);
+    }
+
+    /**
+     * Tenant providers and resolvers are looked up programmatically when a multi-tenant client is
+     * built, never injected, so ArC would otherwise remove them as unused.
+     */
+    @BuildStep
+    UnremovableBeanBuildItem keepTenancyBeans() {
+        return UnremovableBeanBuildItem.beanTypes(SftpTenantProvider.class, TenantResolver.class);
+    }
+
+    /**
+     * Fails the build for a multi-tenant endpoint nothing says how to isolate: no
+     * {@code tenancy.root-directory} and no {@link SftpTenantProvider} bean. Without this the
+     * application would start and fail on first use of the client.
+     */
+    @BuildStep
+    void validateTenancy(ValidationPhaseBuildItem validationPhase,
+            BuildProducer<ValidationPhaseBuildItem.ValidationErrorBuildItem> errors) {
+        boolean providerBean = !validationPhase.getContext().beans()
+                .withBeanType(SftpTenantProvider.class).isEmpty();
+        List<String> problems = new ArrayList<>();
+        for (String name : discoverEndpoints().keySet()) {
+            boolean template = ConfigProvider.getConfig()
+                    .getOptionalValue(ENDPOINT_PREFIX + name + ".tenancy.root-directory", String.class)
+                    .isPresent();
+            if (tenancyEnabled(name) && !template && !providerBean) {
+                problems.add(ENDPOINT_PREFIX + name + ".tenancy is enabled but nothing says how tenants "
+                        + "are isolated: set " + ENDPOINT_PREFIX + name + ".tenancy.root-directory, or "
+                        + "provide an SftpTenantProvider bean");
+            }
+        }
+        if (!problems.isEmpty()) {
+            errors.produce(new ValidationPhaseBuildItem.ValidationErrorBuildItem(
+                    new DeploymentException(String.join(System.lineSeparator(), problems))));
+        }
     }
 
     /** Endpoint name to provider name, in a stable order so the build is reproducible. */

@@ -3,6 +3,7 @@ package io.github.jtsirogiannos.sftp.client.quarkus.it;
 import io.github.jtsirogiannos.sftp.client.api.RemoteFile;
 import io.github.jtsirogiannos.sftp.client.api.SftpClient;
 import io.github.jtsirogiannos.sftp.client.quarkus.runtime.MutinySftpClient;
+import io.github.jtsirogiannos.sftp.client.quarkus.runtime.NamedSftp;
 
 import io.smallrye.mutiny.Uni;
 
@@ -27,17 +28,19 @@ import java.util.stream.Collectors;
  * are no beans to inject into the test. Driving it over the wire is what lets one set of tests
  * verify both.
  *
- * <p>Injection is deliberately unqualified. A single endpoint is configured, and the extension marks
- * a lone endpoint's beans {@code @Default} precisely so this works; the qualified multi-endpoint
- * path is covered by the deployment module's test.
+ * <p>Injection is qualified because a second, multi-tenant endpoint is configured alongside this
+ * one — see {@link TenantResource}. The unqualified single-endpoint path is covered by the deployment
+ * module's tests.
  */
 @Path("/sftp")
 public class SftpResource {
 
     @Inject
+    @NamedSftp("it")
     SftpClient client;
 
     @Inject
+    @NamedSftp("it")
     MutinySftpClient reactiveClient;
 
     /** Proves the provider was resolved through ServiceLoader — the thing native image breaks. */

@@ -24,7 +24,8 @@ public class EmbeddedSftpServerResource implements QuarkusTestResourceLifecycleM
     @Override
     public Map<String, String> start() {
         server.start();
-        return Map.of("sftp.endpoints.it.port", String.valueOf(server.port()));
+        String port = String.valueOf(server.port());
+        return Map.of("sftp.endpoints.it.port", port, "sftp.endpoints.partners.port", port);
     }
 
     @Override

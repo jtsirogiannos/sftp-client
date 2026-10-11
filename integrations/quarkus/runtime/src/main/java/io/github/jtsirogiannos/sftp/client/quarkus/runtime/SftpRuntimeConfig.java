@@ -103,6 +103,47 @@ public interface SftpRuntimeConfig {
         /** Pool tuning for this endpoint, bound from {@code sftp.endpoints.<name>.pool.*}. */
         PoolConfig pool();
 
+        /** Multi-tenancy for this endpoint, bound from {@code sftp.endpoints.<name>.tenancy.*}. */
+        TenancyConfig tenancy();
+
+        interface TenancyConfig {
+
+            /**
+             * Serve many tenants through this endpoint: its beans become a
+             * {@code MultiTenantSftpClient} and a Mutiny client over a multi-tenant one.
+             * <p>
+             * Read during augmentation as well as at runtime, because it decides the bean types — so
+             * changing it means rebuilding.
+             */
+            @WithDefault("false")
+            boolean enabled();
+
+            /**
+             * Confine each tenant to a directory on this endpoint's connection: an absolute path
+             * containing `{tenant}`, such as `/tenants/{tenant}`. Used when no `SftpTenantProvider`
+             * bean decides instead.
+             */
+            Optional<String> rootDirectory();
+
+            /** The pool each tenant with a connection of its own gets. */
+            TenantPoolConfig pool();
+
+            interface TenantPoolConfig {
+
+                /** Most sessions a tenant's own pool holds; one pool per tenant, so kept small. */
+                @WithDefault("2")
+                int maxSize();
+
+                /** How long a tenant's parked session may sit before being closed. */
+                @WithDefault("PT5M")
+                Duration maxIdle();
+
+                /** How long a borrow from a tenant's pool waits at capacity before failing. */
+                @WithDefault("PT30S")
+                Duration acquireTimeout();
+            }
+        }
+
         interface PoolConfig {
 
             /**
