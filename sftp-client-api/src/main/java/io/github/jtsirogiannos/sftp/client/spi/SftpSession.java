@@ -40,6 +40,11 @@ public interface SftpSession extends SftpSessionLifecycle {
      * usable. Callers who stop early should expect the session to be discarded rather than pooled,
      * for the same reason an abandoned download is.
      *
+     * <p>An exception thrown by the visitor propagates to the caller <em>unchanged</em> — it is the
+     * caller's, not an SFTP failure — and the provider must leave the session either in step with
+     * the server or reporting {@link #isValid()} false. Letting it unwind through a half-read reply
+     * is how a session ends up answering the next request with the previous one's bytes.
+     *
      * <p>{@code .} and {@code ..} are never visited — the TCK asserts their absence, because JSch
      * reports them and MINA does not, and leaking that difference would mean every user writing the
      * same filter.

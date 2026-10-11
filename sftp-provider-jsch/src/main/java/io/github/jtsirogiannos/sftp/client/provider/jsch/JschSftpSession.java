@@ -24,12 +24,34 @@ import java.util.function.Predicate;
  * a <em>checked</em> exception with a public {@code id} field, and none of that shape is allowed to
  * reach a caller. Everything is translated to the library's unchecked {@link SftpException}, status
  * code preserved.
+ *
+ * <h2>Paths are patterns to JSch, and must not be</h2>
+ *
+ * <p>Nearly every {@link ChannelSftp} method runs its path through a glob: {@code *} and {@code ?}
+ * match, and a backslash escapes. So {@code rm("/d/*")} deletes every file in {@code /d}, a file
+ * literally named {@code a*b} cannot be opened, and {@code /x/.\./.\./etc} is unescaped into
+ * {@code /x/../../etc} after any lexical check a caller made has passed. The SPI promises literal
+ * paths, so every path handed to a globbing method goes through {@link #literal} first.
+ * {@code mkdir} and {@code realpath} do not glob, and quoting them would put the backslashes on the
+ * wire — they take the path unchanged.
  */
 final class JschSftpSession implements SftpSession {
 
     private final Session session;
     private final ChannelSftp channel;
     private volatile boolean closed;
+
+    /**
+     * Set when a failure may have left the channel out of step with the server.
+     *
+     * <p>JSch reports two very different things as status {@code SSH_FX_FAILURE}: a server that
+     * answered "failure", and an exception thrown partway through reading a reply — an I/O error, a
+     * protocol surprise. The first leaves the channel perfectly usable. The second can leave unread
+     * bytes in the channel, which the next request would read as its own answer, while the socket
+     * still reports itself connected. The two are told apart by the cause: a status error from the
+     * server never carries one.
+     */
+    private volatile boolean broken;
 
     JschSftpSession(Session session, ChannelSftp channel) {
         this.session = session;
@@ -38,32 +60,55 @@ final class JschSftpSession implements SftpSession {
 
     @Override
     public void list(String path, Predicate<RemoteFile> visitor) {
+        Throwable[] visitorFailure = new Throwable[1];
         call("list '" + path + "'", () -> {
             // JSch's own listing API is already a visitor: the selector returns CONTINUE or BREAK,
             // and BREAK stops it issuing further READDIRs. This maps across with no buffering.
-            channel.ls(path, entry -> {
+            channel.ls(literal(path), entry -> {
                 String name = entry.getFilename();
                 // JSch surfaces these; MINA does not. Filtering here is what keeps that difference
                 // from becoming every caller's problem.
                 if (".".equals(name) || "..".equals(name)) {
                     return ChannelSftp.LsEntrySelector.CONTINUE;
                 }
-                return visitor.test(toRemoteFile(name, join(path, name), entry.getAttrs()))
-                        ? ChannelSftp.LsEntrySelector.CONTINUE
-                        : ChannelSftp.LsEntrySelector.BREAK;
+                try {
+                    return visitor.test(toRemoteFile(name, join(path, name), entry.getAttrs()))
+                            ? ChannelSftp.LsEntrySelector.CONTINUE
+                            : ChannelSftp.LsEntrySelector.BREAK;
+                } catch (Throwable failure) {
+                    // Not allowed to escape from here: JSch would abandon the listing halfway
+                    // through a NAME packet, leaving its remaining bytes in the channel and the
+                    // directory handle open. BREAK drains the packet and closes the handle, so the
+                    // visitor's failure costs the caller nothing but the walk.
+                    visitorFailure[0] = failure;
+                    return ChannelSftp.LsEntrySelector.BREAK;
+                }
             });
             return null;
         });
+        if (visitorFailure[0] instanceof RuntimeException e) {
+            throw e;
+        }
+        if (visitorFailure[0] instanceof Error e) {
+            throw e;
+        }
+        if (visitorFailure[0] != null) {
+            // A checked exception smuggled through a Predicate. Not ours to translate into an SFTP
+            // failure, but it has to surface as something unchecked.
+            throw new java.lang.reflect.UndeclaredThrowableException(visitorFailure[0]);
+        }
     }
 
     @Override
     public RemoteFile stat(String path) {
-        return call("stat '" + path + "'", () -> toRemoteFile(fileName(path), path, channel.stat(path)));
+        return call("stat '" + path + "'", () -> toRemoteFile(fileName(path), path,
+                channel.stat(literal(path))));
     }
 
     @Override
     public RemoteFile lstat(String path) {
-        return call("lstat '" + path + "'", () -> toRemoteFile(fileName(path), path, channel.lstat(path)));
+        return call("lstat '" + path + "'", () -> toRemoteFile(fileName(path), path,
+                channel.lstat(literal(path))));
     }
 
     /**
@@ -74,20 +119,20 @@ final class JschSftpSession implements SftpSession {
     @Override
     public void symlink(String linkPath, String targetPath) {
         call("symlink '" + linkPath + "' -> '" + targetPath + "'", () -> {
-            channel.symlink(targetPath, linkPath);
+            channel.symlink(literal(targetPath), literal(linkPath));
             return null;
         });
     }
 
     @Override
     public String readlink(String linkPath) {
-        return call("readlink '" + linkPath + "'", () -> channel.readlink(linkPath));
+        return call("readlink '" + linkPath + "'", () -> channel.readlink(literal(linkPath)));
     }
 
     @Override
     public boolean exists(String path) {
         try {
-            channel.stat(path);
+            channel.stat(literal(path));
             return true;
         } catch (com.jcraft.jsch.SftpException e) {
             if (e.id == ChannelSftp.SSH_FX_NO_SUCH_FILE) {
@@ -110,7 +155,7 @@ final class JschSftpSession implements SftpSession {
     @Override
     public void rename(String from, String to) {
         call("rename '" + from + "' -> '" + to + "'", () -> {
-            channel.rename(from, to);
+            channel.rename(literal(from), literal(to));
             return null;
         });
     }
@@ -121,11 +166,11 @@ final class JschSftpSession implements SftpSession {
             // rm is files-only; rmdir is a separate request. The contract covers both, so the
             // provider decides. lstat rather than stat, so a symlink to a directory is unlinked
             // rather than treated as the directory it points at.
-            SftpATTRS attrs = channel.lstat(path);
+            SftpATTRS attrs = channel.lstat(literal(path));
             if (attrs.isDir() && !attrs.isLink()) {
-                channel.rmdir(path);
+                channel.rmdir(literal(path));
             } else {
-                channel.rm(path);
+                channel.rm(literal(path));
             }
             return null;
         });
@@ -134,7 +179,7 @@ final class JschSftpSession implements SftpSession {
     @Override
     public InputStream openRead(String path, long offset) {
         return call("openRead '" + path + "' at " + offset, () ->
-                offset <= 0 ? channel.get(path) : channel.get(path, null, offset));
+                offset <= 0 ? channel.get(literal(path)) : channel.get(literal(path), null, offset));
     }
 
     @Override
@@ -149,7 +194,7 @@ final class JschSftpSession implements SftpSession {
                             + "SSH_FXF_EXCL equivalent. Check capabilities().atomicCreateNew() first, "
                             + "or use the mina provider.");
         }
-        return call("openWrite '" + path + "'", () -> channel.put(path, jschMode(mode)));
+        return call("openWrite '" + path + "'", () -> channel.put(literal(path), jschMode(mode)));
     }
 
     /**
@@ -174,7 +219,7 @@ final class JschSftpSession implements SftpSession {
         call("setAttributes '" + path + "'", () -> {
             // Read-modify-write, because JSch builds no SftpATTRS from scratch: the flags word on a
             // stat'd instance is what tells the server which fields to apply, and setters add to it.
-            SftpATTRS attrs = channel.stat(path);
+            SftpATTRS attrs = channel.stat(literal(path));
             update.permissions().ifPresent(attrs::setPERMISSIONS);
             update.size().ifPresent(attrs::setSIZE);
             update.modifiedTime().ifPresent(when ->
@@ -183,7 +228,7 @@ final class JschSftpSession implements SftpSession {
                 attrs.setUIDGID(update.ownerId().orElse(attrs.getUId()),
                         update.groupId().orElse(attrs.getGId()));
             }
-            channel.setStat(path, attrs);
+            channel.setStat(literal(path), attrs);
             return null;
         });
     }
@@ -216,7 +261,7 @@ final class JschSftpSession implements SftpSession {
 
     @Override
     public boolean isValid() {
-        return !closed && session.isConnected() && channel.isConnected();
+        return !closed && !broken && session.isConnected() && channel.isConnected();
     }
 
     @Override
@@ -282,9 +327,41 @@ final class JschSftpSession implements SftpSession {
         }
     }
 
-    /** Carries JSch's {@code id} across as the SSH_FX status, so callers never parse messages. */
-    private static SftpException translate(String what, com.jcraft.jsch.SftpException e) {
+    /**
+     * Carries JSch's {@code id} across as the SSH_FX status, so callers never parse messages — when it
+     * really is one.
+     *
+     * <p>A JSch exception with a cause did not come from a server status reply: JSch wraps anything
+     * that goes wrong mid-request as {@code SSH_FX_FAILURE}. Reporting that as a server status would
+     * misdescribe it, and the channel may now be out of step, so the session marks itself broken and
+     * the pool will not hand it out again.
+     */
+    private SftpException translate(String what, com.jcraft.jsch.SftpException e) {
+        if (e.getCause() != null) {
+            broken = true;
+            return new SftpException(what + " failed: " + e.getMessage(), e);
+        }
         return new SftpException(what + " failed: " + e.getMessage(), e, e.id);
+    }
+
+    /**
+     * Escapes a path so JSch treats it literally rather than as a glob — the same escaping JSch's own
+     * package-private {@code Util.quote} applies: a backslash before every {@code \}, {@code *} and
+     * {@code ?}. JSch strips exactly one level of it again before the path goes on the wire.
+     */
+    static String literal(String path) {
+        if (path.indexOf('\\') < 0 && path.indexOf('*') < 0 && path.indexOf('?') < 0) {
+            return path;
+        }
+        StringBuilder escaped = new StringBuilder(path.length() + 8);
+        for (int i = 0; i < path.length(); i++) {
+            char c = path.charAt(i);
+            if (c == '\\' || c == '*' || c == '?') {
+                escaped.append('\\');
+            }
+            escaped.append(c);
+        }
+        return escaped.toString();
     }
 
     @FunctionalInterface

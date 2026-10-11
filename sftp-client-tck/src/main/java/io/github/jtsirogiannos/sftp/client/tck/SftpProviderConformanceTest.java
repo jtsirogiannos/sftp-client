@@ -557,6 +557,79 @@ public abstract class SftpProviderConformanceTest {
                 .isEqualTo(payload.length);
     }
 
+    /**
+     * A visitor that throws must not be able to wreck the session behind it.
+     *
+     * <p>The throw arrives in the middle of a listing, with entries the server has already sent still
+     * queued. A provider that lets it unwind straight out of its read loop leaves those bytes in the
+     * channel, and the next request reads them as its own reply — while the socket still reports
+     * itself connected, so the pool would hand the corrupted session to someone else. Either the
+     * session is still in step, or it must say it is not.
+     *
+     * <p>The exception itself is the caller's and propagates unchanged, the same as from a
+     * {@code forEach}: it is not an SFTP failure and must not be dressed up as one.
+     */
+    @Test
+    void aThrowingVisitorPropagatesAndLeavesTheSessionUsableOrInvalid() {
+        session().mkdir("/upload/visitor-throws");
+        for (int i = 0; i < 20; i++) {
+            writeFile("/upload/visitor-throws/file-" + i + ".txt", "x");
+        }
+        IllegalStateException failure = new IllegalStateException("visitor failed");
+
+        assertThatThrownBy(() -> session().list("/upload/visitor-throws", entry -> {
+            throw failure;
+        })).isSameAs(failure);
+
+        if (session().isValid()) {
+            assertThat(session().list("/upload/visitor-throws"))
+                    .describedAs("a session that still claims to be valid must still be in step")
+                    .hasSize(20);
+        }
+    }
+
+    /**
+     * Paths are literal: {@code *}, {@code ?} and {@code \} are ordinary characters.
+     *
+     * <p>Not a nicety. A backend that globs turns {@code remove("/d/*")} into deleting the whole
+     * directory, and one that treats backslash as an escape lets {@code /a/.\./b} through any
+     * lexical {@code ..} check its caller made and then resolves it as {@code /a/../b}.
+     */
+    @Test
+    void pathsWithGlobCharactersAreLiteral() {
+        session().mkdir("/upload/glob");
+        writeFile("/upload/glob/a*b.txt", "star");
+        writeFile("/upload/glob/a1b.txt", "one");
+        writeFile("/upload/glob/a?b.txt", "question");
+
+        assertThat(session().stat("/upload/glob/a*b.txt").size()).isEqualTo(4);
+        session().remove("/upload/glob/a*b.txt");
+        assertThat(session().exists("/upload/glob/a1b.txt"))
+                .describedAs("removing a file named a*b.txt must not glob onto its neighbours")
+                .isTrue();
+        assertThat(session().exists("/upload/glob/a*b.txt")).isFalse();
+
+        session().rename("/upload/glob/a?b.txt", "/upload/glob/renamed?.txt");
+        assertThat(session().exists("/upload/glob/renamed?.txt")).isTrue();
+        assertThat(session().exists("/upload/glob/a1b.txt")).isTrue();
+
+        session().mkdir("/upload/glob/dir*");
+        assertThat(session().list("/upload/glob/dir*")).isEmpty();
+        session().remove("/upload/glob/dir*");
+        assertThat(session().exists("/upload/glob/dir*")).isFalse();
+    }
+
+    /** A backslash is a character in a name, never an escape that turns {@code .\.} into {@code ..}. */
+    @Test
+    void backslashIsNotAnEscape() {
+        session().mkdir("/upload/backslash");
+        writeFile("/upload/backslash-target.txt", "x");
+
+        assertThat(session().exists("/upload/backslash/.\\./backslash-target.txt"))
+                .describedAs("'.\\.' must be looked up as a name, not unescaped into '..'")
+                .isFalse();
+    }
+
     private void writeFile(String path, String content) {
         try (OutputStream out = session().openWrite(path, SftpSession.WriteMode.OVERWRITE)) {
             out.write(content.getBytes(StandardCharsets.UTF_8));

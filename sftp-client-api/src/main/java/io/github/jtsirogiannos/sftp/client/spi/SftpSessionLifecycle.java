@@ -39,6 +39,12 @@ public interface SftpSessionLifecycle extends AutoCloseable {
      * the channel perfectly usable, and the TCK checks exactly that. Only transport-level failures
      * invalidate a session.
      *
+     * <p>Conversely, <strong>it must return false whenever the channel may be out of step with the
+     * server</strong> — after an I/O error mid-reply, a protocol surprise, anything that could leave
+     * unread bytes behind. A connected socket is not proof of a usable session. The core recycles a
+     * session on exactly this answer, so a provider that reports a desynchronised channel as valid
+     * hands the next caller somebody else's reply.
+     *
      * <p>The no-round-trip rule is load-bearing beyond politeness: the pool's non-blocking
      * {@code borrowAsync} fast path calls this inline, on whatever thread asked for a session. A
      * provider that phoned the server here would block an event loop.
