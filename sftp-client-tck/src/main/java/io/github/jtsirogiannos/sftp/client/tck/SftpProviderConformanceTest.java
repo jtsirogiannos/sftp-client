@@ -76,6 +76,16 @@ public abstract class SftpProviderConformanceTest {
                 .isEqualTo(1);
     }
 
+    /** The root is a directory like any other: its listing holds its children, never itself. */
+    @Test
+    void listingTheRootDoesNotIncludeTheRootItself() {
+        List<RemoteFile> entries = session().list("/");
+
+        assertThat(entries).extracting(RemoteFile::path).doesNotContain("/", "");
+        assertThat(entries).extracting(RemoteFile::name).doesNotContain("/", "", ".", "..");
+        assertThat(entries).extracting(RemoteFile::name).contains("upload");
+    }
+
     // --- streaming a listing ---
 
     /** The visitor must see exactly what the collected listing does, dot entries excluded. */

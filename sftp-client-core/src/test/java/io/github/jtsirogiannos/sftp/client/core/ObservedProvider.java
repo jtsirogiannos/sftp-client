@@ -23,12 +23,12 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * fake's idea of SFTP; a proxy on top, so it can also see which session was opened, whether it was
  * closed, and make one report itself broken the way a provider must after a desync.
  */
-final class ObservedProvider implements SftpProvider {
+public final class ObservedProvider implements SftpProvider {
 
     private final InMemorySftpProvider real = new InMemorySftpProvider();
-    final List<Observed> sessions = new CopyOnWriteArrayList<>();
+    public final List<Observed> sessions = new CopyOnWriteArrayList<>();
 
-    static SftpConnectionConfig config() {
+    public static SftpConnectionConfig config() {
         return SftpConnectionConfig.builder()
                 .host("localhost")
                 .username("test")
@@ -37,7 +37,7 @@ final class ObservedProvider implements SftpProvider {
                 .build();
     }
 
-    BoundedSftpSessionPool<SftpSession> pool(int maxSize) {
+    public BoundedSftpSessionPool<SftpSession> pool(int maxSize) {
         return BoundedSftpSessionPool.blocking(this, config(), maxSize, Duration.ofMinutes(5),
                 Duration.ofMillis(300));
     }
@@ -60,16 +60,16 @@ final class ObservedProvider implements SftpProvider {
     }
 
     /** The most recently opened session. */
-    Observed last() {
+    public Observed last() {
         return sessions.get(sessions.size() - 1);
     }
 
-    static final class Observed {
+    public static final class Observed {
 
         final SftpSession real;
         final SftpSession proxy;
-        volatile boolean broken;
-        volatile boolean closed;
+        public volatile boolean broken;
+        public volatile boolean closed;
 
         Observed(SftpSession real) {
             this.real = real;

@@ -101,7 +101,12 @@ final class InMemoryFileSystem {
         String prefix = resolved.endsWith("/") ? resolved : resolved + "/";
         List<String> children = new ArrayList<>();
         for (String candidate : new ArrayList<>(nodes.keySet())) {
-            if (candidate.startsWith(prefix) && !candidate.substring(prefix.length()).contains("/")) {
+            if (!candidate.startsWith(prefix)) {
+                continue;
+            }
+            String rest = candidate.substring(prefix.length());
+            // Non-empty, or "/" — whose prefix is itself — would list itself as its own child.
+            if (!rest.isEmpty() && !rest.contains("/")) {
                 children.add(candidate);
             }
         }
