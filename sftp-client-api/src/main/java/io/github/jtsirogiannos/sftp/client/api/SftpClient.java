@@ -45,8 +45,11 @@ public interface SftpClient extends SftpOperations, AutoCloseable {
      * third operation fails the first two have already happened and nothing undoes them. What you
      * get is one connection, not atomicity.
      *
-     * <p>The session is returned to the pool when the block ends normally, and discarded if the
-     * block throws — its state is then unknown. Anything stream-shaped opened inside, such as
+     * <p>Anything the block throws reaches the caller unchanged; it is not wrapped in
+     * {@link SftpException}. When the block ends, normally or not, the connection goes back to the
+     * pool if the provider still vouches for it and no stream opened inside is left open, and is
+     * discarded otherwise — so a business exception thrown mid-block costs nothing, and a broken
+     * connection is never handed to the next caller. Anything stream-shaped opened inside, such as
      * {@link SftpOperations#download(String)}, is only valid until the block returns.
      */
     <R> R withSession(Function<SftpOperations, R> work);

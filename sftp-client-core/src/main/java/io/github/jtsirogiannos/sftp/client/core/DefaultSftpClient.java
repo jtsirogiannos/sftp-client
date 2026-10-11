@@ -49,15 +49,28 @@ public class DefaultSftpClient implements SftpClient {
     @Override
     public void visit(String path, java.util.function.Predicate<RemoteFile> visitor) {
         boolean[] stoppedEarly = {false};
+        RuntimeException[] visitorFailure = {null};
         SftpSession session = pool.borrow();
         try {
             session.list(path, entry -> {
-                boolean carryOn = visitor.test(entry);
+                boolean carryOn;
+                try {
+                    carryOn = visitor.test(entry);
+                } catch (RuntimeException e) {
+                    visitorFailure[0] = e;
+                    throw e;
+                }
                 stoppedEarly[0] = !carryOn;
                 return carryOn;
             });
         } catch (RuntimeException e) {
             pool.discard(session);
+            // The visitor's own exception is the caller's, and reaches them unchanged — the
+            // provider contract guarantees it arrives here intact. Only a provider failure is
+            // normalised to SftpException.
+            if (e == visitorFailure[0]) {
+                throw e;
+            }
             throw e instanceof SftpException ? e : new SftpException("operation failed", e);
         }
         if (stoppedEarly[0]) {
@@ -213,27 +226,16 @@ public class DefaultSftpClient implements SftpClient {
     /**
      * One borrow for the whole block.
      *
-     * <p>Returned to the pool if the block completes, discarded if it throws — a session whose last
-     * operation blew up is in an unknown state, and the pool's rule everywhere else is that anything
-     * doubtful gets closed rather than handed to the next caller.
+     * <p>Whatever the block throws reaches the caller unchanged — it is the caller's exception, not
+     * an SFTP failure, and wrapping it would make {@code catch (OrderRejected e)} around a block
+     * silently stop working. Whether the session goes back to the pool is a separate question,
+     * answered by the session itself: see {@link PooledSftpClientSession}.
      */
     @Override
     public <R> R withSession(java.util.function.Function<
             io.github.jtsirogiannos.sftp.client.api.SftpOperations, R> work) {
-        SftpSession session = pool.borrow();
-        boolean healthy = false;
-        try {
-            R result = work.apply(new SessionBoundOperations(session));
-            healthy = true;
-            return result;
-        } catch (RuntimeException e) {
-            throw e instanceof SftpException ? e : new SftpException("session work failed", e);
-        } finally {
-            if (healthy && session.isValid()) {
-                pool.recycle(session);
-            } else {
-                pool.discard(session);
-            }
+        try (PooledSftpClientSession session = new PooledSftpClientSession(pool.borrow(), pool)) {
+            return work.apply(session);
         }
     }
 

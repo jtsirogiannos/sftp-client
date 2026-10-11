@@ -54,5 +54,14 @@
             <artifactId>assertj-core</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- A real filesystem behind the session tests, so what they observe is pool and routing
+             behaviour rather than a hand-rolled fake's idea of SFTP. Its compile scope is the API and
+             slf4j-api only, so it brings no JUnit onto this TestNG-only classpath. -->
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>sftp-provider-inmemory</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>

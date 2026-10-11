@@ -157,22 +157,26 @@ public class DefaultSftpClientVisitTest {
         }
     }
 
-    /** A block that throws leaves the session in an unknown state, so it must not be pooled. */
+    /**
+     * A block's own exception says nothing about the connection, so it neither reaches the caller
+     * dressed as an SFTP failure nor costs a reconnect. The full policy is pinned in
+     * {@code SessionRecyclePolicyTest}.
+     */
     @Test
-    public void aFailingBlockDiscardsTheSession() {
+    public void aFailingBlockRethrowsUnchangedAndKeepsAHealthySession() {
         ListingProvider provider = new ListingProvider(5);
         try (BoundedSftpSessionPool<SftpSession> pool = pool(provider)) {
             DefaultSftpClient client = new DefaultSftpClient(provider, pool);
+            IllegalStateException boom = new IllegalStateException("boom");
 
             assertThatThrownBy(() -> client.withSessionWithoutResult(ops -> {
                 ops.list("/upload");
-                throw new IllegalStateException("boom");
-            })).isInstanceOf(SftpException.class);
+                throw boom;
+            })).isSameAs(boom);
 
             assertThat(pool.idleSessions())
-                    .describedAs("a session whose last operation blew up must never be reused")
-                    .isZero();
-            assertThat(pool.liveSessions()).isZero();
+                    .describedAs("the provider still vouches for the channel, so it is reused")
+                    .isEqualTo(1);
         }
     }
 
@@ -186,7 +190,7 @@ public class DefaultSftpClientVisitTest {
             assertThatThrownBy(() -> client.withSessionWithoutResult(ops -> {
                 ops.mkdir("/upload/created");
                 throw new IllegalStateException("failed after the mkdir");
-            })).isInstanceOf(SftpException.class);
+            })).isInstanceOf(IllegalStateException.class);
 
             assertThat(provider.lastSession.directoriesCreated)
                     .describedAs("the earlier operation is not rolled back — SFTP has no transactions")
