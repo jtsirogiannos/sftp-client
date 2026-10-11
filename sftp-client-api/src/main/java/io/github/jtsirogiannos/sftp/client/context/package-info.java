@@ -1,7 +1,8 @@
 /**
  * Contextual session demarcation: which session is current, and where that is remembered.
  *
- * <p>A unit of work that opens a session with {@code withSession} makes it current, and from then
+ * <p>A unit of work that opens a session with {@code withSession} — or a method annotated
+ * {@link io.github.jtsirogiannos.sftp.client.api.WithSftpSession} — makes it current, and from then
  * until the work ends every call on the client itself travels over that one connection, however deep
  * in the call stack it is made. That is Hibernate's {@code getCurrentSession()}, and this package is
  * the part that decides where "current" lives:

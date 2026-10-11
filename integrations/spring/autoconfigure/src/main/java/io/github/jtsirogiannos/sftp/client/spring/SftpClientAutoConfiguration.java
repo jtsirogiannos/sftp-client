@@ -55,4 +55,13 @@ public class SftpClientAutoConfiguration {
     public static SftpClientRegistrar sftpClientRegistrar() {
         return new SftpClientRegistrar();
     }
+
+    /**
+     * Honours {@link io.github.jtsirogiannos.sftp.client.api.WithSftpSession}. Static for the same
+     * reason as the registrar: a post-processor is created before the rest of the configuration.
+     */
+    @Bean
+    public static WithSftpSessionPostProcessor withSftpSessionPostProcessor() {
+        return new WithSftpSessionPostProcessor();
+    }
 }

@@ -1,18 +1,24 @@
 package io.github.jtsirogiannos.sftp.client.quarkus.deployment;
 
 import io.github.jtsirogiannos.sftp.client.api.SftpClient;
-import io.github.jtsirogiannos.sftp.client.spi.SftpProvider;
-
+import io.github.jtsirogiannos.sftp.client.api.WithSftpSession;
 import io.github.jtsirogiannos.sftp.client.quarkus.runtime.MutinySftpClient;
 import io.github.jtsirogiannos.sftp.client.quarkus.runtime.NamedSftp;
 import io.github.jtsirogiannos.sftp.client.quarkus.runtime.SftpClientRecorder;
+import io.github.jtsirogiannos.sftp.client.quarkus.runtime.WithSftpSessionInterceptor;
+import io.github.jtsirogiannos.sftp.client.spi.SftpProvider;
 
 import io.quarkus.arc.BeanDestroyer;
+import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
+import io.quarkus.arc.deployment.InterceptorBindingRegistrarBuildItem;
 import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
+import io.quarkus.arc.deployment.ValidationPhaseBuildItem;
+import io.quarkus.arc.processor.InterceptorBindingRegistrar;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
+import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
 import io.quarkus.deployment.builditem.ExecutorBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.RuntimeInitializedClassBuildItem;
@@ -20,16 +26,23 @@ import io.quarkus.deployment.builditem.nativeimage.ServiceProviderBuildItem;
 import io.quarkus.runtime.configuration.ConfigurationException;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.spi.DeploymentException;
 
 import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.jandex.AnnotationInstance;
+import org.jboss.jandex.AnnotationTarget;
+import org.jboss.jandex.AnnotationValue;
+import org.jboss.jandex.ClassInfo;
 import org.jboss.jandex.DotName;
+import org.jboss.jandex.MethodInfo;
 
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
@@ -61,6 +74,102 @@ class SftpClientProcessor {
     FeatureBuildItem feature() {
         return new FeatureBuildItem(FEATURE);
     }
+
+    /**
+     * Makes {@link WithSftpSession} a CDI interceptor binding. It lives in the dependency-free API,
+     * where it cannot be annotated as one; {@code value} is non-binding, so the one interceptor
+     * serves every endpoint and reads the name from the binding at run time.
+     */
+    @BuildStep
+    InterceptorBindingRegistrarBuildItem withSftpSessionBinding() {
+        return new InterceptorBindingRegistrarBuildItem(new InterceptorBindingRegistrar() {
+            @Override
+            public List<InterceptorBinding> getAdditionalBindings() {
+                return List.of(InterceptorBinding.of(WithSftpSession.class, Set.of("value")));
+            }
+        });
+    }
+
+    @BuildStep
+    AdditionalBeanBuildItem withSftpSessionInterceptor() {
+        return AdditionalBeanBuildItem.unremovableOf(WithSftpSessionInterceptor.class);
+    }
+
+    /**
+     * Refuses a {@link WithSftpSession} the application could not honour, failing the build rather
+     * than the first request: an endpoint that is not configured, an empty value when there is not
+     * exactly one endpoint, or a return type that completes after the method returns without being a
+     * {@code Uni} — the one asynchronous type the interceptor can keep a session open across.
+     */
+    @BuildStep
+    void validateWithSftpSession(ValidationPhaseBuildItem validationPhase, CombinedIndexBuildItem index,
+            BuildProducer<ValidationPhaseBuildItem.ValidationErrorBuildItem> errors) {
+        Set<String> endpoints = discoverEndpoints().keySet();
+        List<String> problems = new ArrayList<>();
+        for (AnnotationInstance annotation : index.getIndex().getAnnotations(WITH_SFTP_SESSION)) {
+            AnnotationValue value = annotation.value();
+            String endpoint = value == null ? "" : value.asString();
+            List<MethodInfo> methods = new ArrayList<>();
+            if (annotation.target().kind() == AnnotationTarget.Kind.METHOD) {
+                methods.add(annotation.target().asMethod());
+            } else if (annotation.target().kind() == AnnotationTarget.Kind.CLASS) {
+                ClassInfo type = annotation.target().asClass();
+                if (type.name().equals(INTERCEPTOR)) {
+                    continue; // the interceptor's own binding, not a use of it
+                }
+                for (MethodInfo method : type.methods()) {
+                    if (Modifier.isPublic(method.flags()) && !Modifier.isStatic(method.flags())
+                            && !method.isConstructor() && !method.isStaticInitializer()) {
+                        methods.add(method);
+                    }
+                }
+            } else {
+                continue;
+            }
+            for (MethodInfo method : methods) {
+                String where = method.declaringClass().name() + "." + method.name() + "()";
+                if (endpoint.isEmpty() && endpoints.size() != 1) {
+                    problems.add(where + " names no endpoint, and " + endpoints.size()
+                            + " are configured " + endpoints + "; say which, as @WithSftpSession(\"name\")");
+                } else if (!endpoint.isEmpty() && !endpoints.contains(endpoint)) {
+                    problems.add(where + " names endpoint '" + endpoint + "', which is not configured; "
+                            + "configured: " + endpoints);
+                }
+                String unsupported = unsupportedReturn(method);
+                if (unsupported != null) {
+                    problems.add(where + " " + unsupported);
+                }
+            }
+        }
+        if (!problems.isEmpty()) {
+            errors.produce(new ValidationPhaseBuildItem.ValidationErrorBuildItem(new DeploymentException(
+                    "@WithSftpSession cannot be honoured:" + System.lineSeparator() + "  "
+                            + String.join(System.lineSeparator() + "  ", problems))));
+        }
+    }
+
+    private static String unsupportedReturn(MethodInfo method) {
+        List<org.jboss.jandex.Type> parameters = method.parameterTypes();
+        if (!parameters.isEmpty()
+                && parameters.get(parameters.size() - 1).name().toString().equals("kotlin.coroutines.Continuation")) {
+            return "is a Kotlin suspend function; use SuspendingSftpClient.withSession { } inside it";
+        }
+        String returned = method.returnType().name().toString();
+        if (UNSUPPORTED_RETURNS.contains(returned)) {
+            return "returns " + returned + ", which completes after the method returns and is not a "
+                    + "Uni; return Uni, or use the client's withSession";
+        }
+        return null;
+    }
+
+    private static final DotName WITH_SFTP_SESSION = DotName.createSimple(WithSftpSession.class.getName());
+    private static final DotName INTERCEPTOR = DotName.createSimple(WithSftpSessionInterceptor.class.getName());
+    private static final Set<String> UNSUPPORTED_RETURNS = Set.of(
+            "io.smallrye.mutiny.Multi",
+            "java.util.concurrent.CompletionStage",
+            "java.util.concurrent.CompletableFuture",
+            "java.util.concurrent.Flow$Publisher",
+            "org.reactivestreams.Publisher");
 
     /**
      * Native image drops {@code META-INF/services} unless told otherwise, and provider lookup is

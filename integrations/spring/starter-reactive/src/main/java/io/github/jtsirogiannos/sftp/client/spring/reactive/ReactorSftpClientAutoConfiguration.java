@@ -32,6 +32,16 @@ public class ReactorSftpClientAutoConfiguration {
         return new ReactorSftpClientRegistrar();
     }
 
+    /**
+     * Lets {@code @WithSftpSession} demarcate methods returning {@code Mono} and {@code Flux}. Looked
+     * up by the shared auto-configuration's interceptor, which knows nothing of Reactor itself.
+     */
+    @Bean
+    public io.github.jtsirogiannos.sftp.client.spring.SftpSessionDemarcation reactorSessionDemarcation(
+            org.springframework.beans.factory.BeanFactory beanFactory) {
+        return new ReactorSessionDemarcation(beanFactory);
+    }
+
     /** Referenced so the dependency on Reactor is explicit rather than incidental. */
     static Class<?> reactorMarker() {
         return Flux.class;
