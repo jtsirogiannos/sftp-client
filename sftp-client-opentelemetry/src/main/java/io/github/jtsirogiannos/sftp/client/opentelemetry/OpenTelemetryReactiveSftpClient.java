@@ -1,27 +1,24 @@
 package io.github.jtsirogiannos.sftp.client.opentelemetry;
 
-import io.github.jtsirogiannos.sftp.client.api.AttributeUpdate;
-import io.github.jtsirogiannos.sftp.client.api.FilesystemStats;
 import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClient;
-import io.github.jtsirogiannos.sftp.client.api.RemoteFile;
+import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClientSession;
+import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpOperations;
 import io.github.jtsirogiannos.sftp.client.api.SftpConnectionConfig;
-import io.github.jtsirogiannos.sftp.client.core.ByteCountingPublisher;
-import io.github.jtsirogiannos.sftp.client.core.ForwardingReactiveSftpClient;
+import io.github.jtsirogiannos.sftp.client.context.SftpSessionContext;
+import io.github.jtsirogiannos.sftp.client.core.ForwardingReactiveSftpClientSession;
+import io.github.jtsirogiannos.sftp.client.core.ForwardingReactiveSftpOperations;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.trace.Span;
-import io.opentelemetry.api.trace.SpanBuilder;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
 
-import java.nio.ByteBuffer;
-import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.Flow;
-import java.util.function.Supplier;
+import java.util.function.Function;
 
 /**
  * The reactive counterpart to {@link OpenTelemetrySftpClient}, emitting the same spans.
@@ -40,15 +37,24 @@ import java.util.function.Supplier;
  * different thread from the one it was opened on, which is exactly how context leaks between
  * unrelated requests.
  *
+ * <h2>Units of work</h2>
+ *
+ * <p>A {@code withSession} block becomes one {@code sftp.session} span, from the call until the
+ * work's stage completes, and a session from {@code openSession} one from open to close; the
+ * session's operations are its children. Neither span is made current, for the reason above: their
+ * children name them as parent explicitly.
+ *
  * <p>See {@link SftpAttributes} for which attributes are standard and which are invented — there is
  * no semantic convention for file transfer.
  */
-public final class OpenTelemetryReactiveSftpClient extends ForwardingReactiveSftpClient {
+public final class OpenTelemetryReactiveSftpClient extends ForwardingReactiveSftpOperations
+        implements ReactiveSftpClient {
 
     private final ReactiveSftpClient client;
     private final Tracer tracer;
     private final Endpoint endpoint;
     private final java.util.function.UnaryOperator<String> pathRedactor;
+    private final ReactiveSftpOperations traced;
 
     private OpenTelemetryReactiveSftpClient(ReactiveSftpClient client, Tracer tracer,
             Endpoint endpoint, java.util.function.UnaryOperator<String> pathRedactor) {
@@ -56,6 +62,7 @@ public final class OpenTelemetryReactiveSftpClient extends ForwardingReactiveSft
         this.tracer = tracer;
         this.endpoint = endpoint;
         this.pathRedactor = pathRedactor;
+        this.traced = new TracedReactiveSftpOperations(client, tracer, endpoint, pathRedactor, null);
     }
 
     /** Wraps {@code client}, taking the {@link OpenTelemetry} instance rather than the global. */
@@ -79,137 +86,89 @@ public final class OpenTelemetryReactiveSftpClient extends ForwardingReactiveSft
     }
 
     @Override
-    protected ReactiveSftpClient delegate() {
-        return client;
+    protected ReactiveSftpOperations delegate() {
+        return traced;
     }
 
     @Override
-    public CompletionStage<List<RemoteFile>> list(String path) {
-        return traced("list", path, () -> client.list(path));
+    public <R> CompletionStage<R> withSession(
+            Function<ReactiveSftpOperations, ? extends CompletionStage<R>> work) {
+        Span span = sessionSpan();
+        Context parent = Context.current().with(span);
+        CompletionStage<R> outcome;
+        try {
+            outcome = client.withSession(operations -> work.apply(
+                new TracedReactiveSftpOperations(operations, tracer, endpoint, pathRedactor, parent)));
+        } catch (RuntimeException e) {
+            outcome = CompletableFuture.failedFuture(e);
+        }
+        return outcome.whenComplete((value, failure) -> endSession(span, failure));
     }
 
     @Override
-    public CompletionStage<RemoteFile> stat(String path) {
-        return traced("stat", path, () -> client.stat(path));
+    public CompletionStage<ReactiveSftpClientSession> openSession() {
+        Span span = sessionSpan();
+        Context parent = Context.current().with(span);
+        return client.openSession()
+            .whenComplete((session, failure) -> {
+                if (failure != null) {
+                    endSession(span, failure);
+                }
+            })
+            .thenApply(session -> {
+                ReactiveSftpOperations operations =
+                    new TracedReactiveSftpOperations(session, tracer, endpoint, pathRedactor, parent);
+                return new ForwardingReactiveSftpClientSession() {
+                    @Override
+                    protected ReactiveSftpOperations delegate() {
+                        return operations;
+                    }
+
+                    @Override
+                    protected ReactiveSftpClientSession session() {
+                        return session;
+                    }
+
+                    @Override
+                    public CompletionStage<Void> close() {
+                        boolean wasOpen = session.isOpen();
+                        CompletionStage<Void> closed = super.close();
+                        return wasOpen ? closed.whenComplete((v, e) -> span.end()) : closed;
+                    }
+                };
+            });
     }
 
-    @Override
-    public CompletionStage<RemoteFile> lstat(String path) {
-        return traced("lstat", path, () -> client.lstat(path));
-    }
-
-    @Override
-    public CompletionStage<Boolean> exists(String path) {
-        return traced("exists", path, () -> client.exists(path));
-    }
-
-    @Override
-    public CompletionStage<String> realpath(String path) {
-        return traced("realpath", path, () -> client.realpath(path));
-    }
-
-    @Override
-    public CompletionStage<Void> mkdir(String path) {
-        return traced("mkdir", path, () -> client.mkdir(path));
-    }
-
-    @Override
-    public CompletionStage<Void> rename(String from, String to) {
-        return traced("rename", from, () -> client.rename(from, to));
-    }
-
-    @Override
-    public CompletionStage<Void> remove(String path) {
-        return traced("remove", path, () -> client.remove(path));
-    }
-
-    @Override
-    public CompletionStage<Void> symlink(String linkPath, String targetPath) {
-        return traced("symlink", linkPath, () -> client.symlink(linkPath, targetPath));
-    }
-
-    @Override
-    public CompletionStage<String> readlink(String linkPath) {
-        return traced("readlink", linkPath, () -> client.readlink(linkPath));
-    }
-
-    @Override
-    public CompletionStage<Void> hardlink(String linkPath, String targetPath) {
-        return traced("hardlink", linkPath, () -> client.hardlink(linkPath, targetPath));
-    }
-
-    @Override
-    public CompletionStage<Void> setAttributes(String path, AttributeUpdate update) {
-        return traced("setAttributes", path, () -> client.setAttributes(path, update));
-    }
-
-    @Override
-    public CompletionStage<FilesystemStats> statvfs(String path) {
-        return traced("statvfs", path, () -> client.statvfs(path));
-    }
-
-    /** The span covers the subscription: nothing is transferred until someone subscribes. */
-    @Override
-    public Flow.Publisher<ByteBuffer> download(String remotePath, long fromOffset) {
-        Flow.Publisher<ByteBuffer> source = client.download(remotePath, fromOffset);
-        return subscriber -> {
-            Span span = span("download", remotePath);
-            new ByteCountingPublisher(source, bytes -> {
-                span.setAttribute(SftpAttributes.FILE_SIZE, bytes);
-                span.end();
-            }).subscribe(subscriber);
-        };
-    }
-
-    @Override
-    public CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data,
-            io.github.jtsirogiannos.sftp.client.spi.SftpSession.WriteMode mode) {
-        Span span = span("upload", remotePath);
-        // AtomicLong rather than a long[]: nothing in the SPI orders a third-party provider's
-        // cancel against its stage completion, and the pattern must not rely on it.
-        java.util.concurrent.atomic.AtomicLong sent = new java.util.concurrent.atomic.AtomicLong();
-        Flow.Publisher<ByteBuffer> counted = new ByteCountingPublisher(data, sent::set);
-        return client.upload(remotePath, counted, mode).whenComplete((ignored, failure) -> {
-            // Set even on failure: how much landed before it broke is the interesting part.
-            span.setAttribute(SftpAttributes.FILE_SIZE, sent.get());
-            finish(span, failure);
-        });
-    }
-
-    private <T> CompletionStage<T> traced(String operation, String path,
-            Supplier<CompletionStage<T>> work) {
-        Span span = span(operation, path);
-        return work.get().whenComplete((value, failure) -> finish(span, failure));
-    }
-
-    private Span span(String operation, String path) {
-        SpanBuilder builder = tracer.spanBuilder("sftp." + operation)
+    /** INTERNAL, not CLIENT: a unit of work over a connection, not a single remote call. */
+    private Span sessionSpan() {
+        return tracer.spanBuilder("sftp.session")
             .setParent(Context.current())
-            .setSpanKind(SpanKind.CLIENT)
+            .setSpanKind(SpanKind.INTERNAL)
             .setAttribute(SftpAttributes.SERVER_ADDRESS, endpoint.host())
             .setAttribute(SftpAttributes.SERVER_PORT, (long) endpoint.port())
             .setAttribute(SftpAttributes.NETWORK_PROTOCOL_NAME, "sftp")
-            // Redacted before it leaves the process: filenames embed business data.
-            .setAttribute(SftpAttributes.FILE_PATH, pathRedactor.apply(path));
-        endpoint.protocolVersion()
-            .ifPresent(v -> builder.setAttribute(SftpAttributes.NETWORK_PROTOCOL_VERSION, v));
-        return builder.startSpan();
+            .startSpan();
     }
 
-    /**
-     * Ends the span, unwrapping the {@link CompletionException} the JDK adds around a failure that
-     * arrived through a dependent stage — otherwise every {@code error.type} would read
-     * {@code java.util.concurrent.CompletionException} and say nothing about what went wrong.
-     */
-    private static void finish(Span span, Throwable failure) {
+    private static void endSession(Span span, Throwable failure) {
         if (failure != null) {
             Throwable cause = failure instanceof CompletionException && failure.getCause() != null
-                ? failure.getCause()
-                : failure;
+                ? failure.getCause() : failure;
             span.setStatus(StatusCode.ERROR);
             span.setAttribute(SftpAttributes.ERROR_TYPE, cause.getClass().getCanonicalName());
             span.recordException(cause);
         }
         span.end();
+    }
+
+    /** The wrapped client's: a decorator observes sessions, it does not decide where they live. */
+    @Override
+    public SftpSessionContext sessionContext() {
+        return client.sessionContext();
+    }
+
+    @Override
+    public void close() {
+        client.close();
     }
 }

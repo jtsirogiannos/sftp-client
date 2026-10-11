@@ -1,115 +1,43 @@
 package io.github.jtsirogiannos.sftp.client.core;
 
-import io.github.jtsirogiannos.sftp.client.api.AttributeUpdate;
-import io.github.jtsirogiannos.sftp.client.api.FilesystemStats;
 import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClient;
-import io.github.jtsirogiannos.sftp.client.api.RemoteFile;
-import io.github.jtsirogiannos.sftp.client.spi.SftpCapabilities;
+import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClientSession;
+import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpOperations;
+import io.github.jtsirogiannos.sftp.client.context.SftpSessionContext;
 
-import java.nio.ByteBuffer;
-import java.util.List;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.Flow;
+import java.util.function.Function;
 
 /**
- * Forwards every operation to another {@link ReactiveSftpClient}. The reactive counterpart to
- * {@link ForwardingSftpOperations}, and a base for decorators.
+ * Forwards every operation, and the client's own methods, to another {@link ReactiveSftpClient}. A
+ * base for decorators; see {@link ForwardingReactiveSftpOperations} for what is and is not forwarded.
  *
- * <p>As there, only the abstract operations are forwarded: the {@code default} convenience methods
- * — {@code mkdirs}, {@code deleteRecursively}, {@code uploadAtomically}, {@code findFirst},
- * filtered {@code list} — run on the decorator and their constituent calls pass through it
- * individually, so a decorator observes what actually crossed the wire.
- *
- * <p>Decorating this interface is harder than decorating the blocking one, and the difference is
- * worth stating because it is where the mistakes live: an operation here <em>returns</em> long
- * before it finishes. A decorator that measures around the method call measures the cost of
- * constructing a {@link CompletionStage} and reports approximately zero. Work belongs in a
- * completion callback, and for {@link #download} in the publisher's terminal signal.
+ * <p>Sessions are forwarded untouched, so a decorator built on this observes per-call traffic only.
+ * One that should see a unit of work's operations too overrides {@link #withSession} and
+ * {@link #openSession} to wrap the session it is handed — the decorators in the observability
+ * modules do.
  */
-public abstract class ForwardingReactiveSftpClient implements ReactiveSftpClient {
+public abstract class ForwardingReactiveSftpClient extends ForwardingReactiveSftpOperations
+        implements ReactiveSftpClient {
 
-    /** The instance every call is forwarded to. Called per operation, so keep it cheap. */
+    /** The client every call is forwarded to. Called per operation, so keep it cheap. */
+    @Override
     protected abstract ReactiveSftpClient delegate();
 
     @Override
-    public CompletionStage<List<RemoteFile>> list(String path) {
-        return delegate().list(path);
+    public <R> CompletionStage<R> withSession(
+            Function<ReactiveSftpOperations, ? extends CompletionStage<R>> work) {
+        return delegate().withSession(work);
     }
 
     @Override
-    public CompletionStage<RemoteFile> stat(String path) {
-        return delegate().stat(path);
+    public CompletionStage<ReactiveSftpClientSession> openSession() {
+        return delegate().openSession();
     }
 
     @Override
-    public CompletionStage<Boolean> exists(String path) {
-        return delegate().exists(path);
-    }
-
-    @Override
-    public CompletionStage<Void> mkdir(String path) {
-        return delegate().mkdir(path);
-    }
-
-    @Override
-    public CompletionStage<Void> rename(String from, String to) {
-        return delegate().rename(from, to);
-    }
-
-    @Override
-    public CompletionStage<Void> remove(String path) {
-        return delegate().remove(path);
-    }
-
-    @Override
-    public CompletionStage<RemoteFile> lstat(String path) {
-        return delegate().lstat(path);
-    }
-
-    @Override
-    public CompletionStage<String> realpath(String path) {
-        return delegate().realpath(path);
-    }
-
-    @Override
-    public CompletionStage<Void> symlink(String linkPath, String targetPath) {
-        return delegate().symlink(linkPath, targetPath);
-    }
-
-    @Override
-    public CompletionStage<String> readlink(String linkPath) {
-        return delegate().readlink(linkPath);
-    }
-
-    @Override
-    public CompletionStage<Void> hardlink(String linkPath, String targetPath) {
-        return delegate().hardlink(linkPath, targetPath);
-    }
-
-    @Override
-    public CompletionStage<Void> setAttributes(String path, AttributeUpdate update) {
-        return delegate().setAttributes(path, update);
-    }
-
-    @Override
-    public CompletionStage<FilesystemStats> statvfs(String path) {
-        return delegate().statvfs(path);
-    }
-
-    @Override
-    public Flow.Publisher<ByteBuffer> download(String remotePath, long fromOffset) {
-        return delegate().download(remotePath, fromOffset);
-    }
-
-    @Override
-    public CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data,
-            io.github.jtsirogiannos.sftp.client.spi.SftpSession.WriteMode mode) {
-        return delegate().upload(remotePath, data, mode);
-    }
-
-    @Override
-    public SftpCapabilities capabilities() {
-        return delegate().capabilities();
+    public SftpSessionContext sessionContext() {
+        return delegate().sessionContext();
     }
 
     @Override

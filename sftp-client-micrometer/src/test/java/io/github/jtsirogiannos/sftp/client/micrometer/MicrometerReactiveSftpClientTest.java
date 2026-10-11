@@ -82,6 +82,19 @@ class MicrometerReactiveSftpClientTest {
     }
 
     /** A download publisher nobody subscribes to has transferred nothing and must report nothing. */
+    /** A reactive unit of work's operations are measured like everything else, not lost. */
+    @Test
+    void measuresOperationsInsideAUnitOfWorkAndOnAnOpenSession() throws Exception {
+        await(client.withSession(ops -> ops.mkdir("/upload/rx-unit")
+            .thenCompose(v -> ops.upload("/upload/rx-unit/f.bin", publisherOf(new byte[10])))));
+        var session = await(client.openSession());
+        await(session.mkdir("/upload/rx-opened"));
+        await(session.close());
+
+        assertThat(timerCount("mkdir", "success")).isEqualTo(2);
+        assertThat(counterTotal("upload")).isEqualTo(10);
+    }
+
     @Test
     void doesNotRecordADownloadThatWasNeverSubscribed() {
         client.download("/upload/never.bin");
@@ -126,6 +139,9 @@ class MicrometerReactiveSftpClientTest {
         @Override public Flow.Publisher<ByteBuffer> download(String p, long o) { return delegate.download(p, o); }
         @Override public CompletionStage<Void> upload(String p, Flow.Publisher<ByteBuffer> d, io.github.jtsirogiannos.sftp.client.spi.SftpSession.WriteMode m) { return delegate.upload(p, d, m); }
         @Override public io.github.jtsirogiannos.sftp.client.spi.SftpCapabilities capabilities() { return delegate.capabilities(); }
+        @Override public <R> CompletionStage<R> withSession(java.util.function.Function<io.github.jtsirogiannos.sftp.client.api.ReactiveSftpOperations, ? extends CompletionStage<R>> w) { return delegate.withSession(w); }
+        @Override public CompletionStage<io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClientSession> openSession() { return delegate.openSession(); }
+        @Override public io.github.jtsirogiannos.sftp.client.context.SftpSessionContext sessionContext() { return delegate.sessionContext(); }
         @Override public void close() { delegate.close(); }
     }
 

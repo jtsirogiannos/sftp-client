@@ -2,7 +2,7 @@ package io.github.jtsirogiannos.sftp.client.core;
 
 import io.github.jtsirogiannos.sftp.client.api.AttributeUpdate;
 import io.github.jtsirogiannos.sftp.client.api.FilesystemStats;
-import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClient;
+import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpOperations;
 import io.github.jtsirogiannos.sftp.client.api.RemoteFile;
 import io.github.jtsirogiannos.sftp.client.api.SftpException;
 import io.github.jtsirogiannos.sftp.client.spi.SftpCapabilities;
@@ -82,7 +82,7 @@ public class ReactivePathHandlingTest {
     }
 
     /** Directories and uploads are remembered; everything off the paths under test is refused. */
-    private static final class RecordingClient implements ReactiveSftpClient {
+    private static final class RecordingClient implements ReactiveSftpOperations {
 
         final Set<String> dirs = ConcurrentHashMap.newKeySet();
         final List<String> uploads = new CopyOnWriteArrayList<>();
@@ -173,8 +173,5 @@ public class ReactivePathHandlingTest {
             throw new UnsupportedOperationException();
         }
 
-        @Override
-        public void close() {
-        }
     }
 }

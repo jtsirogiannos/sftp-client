@@ -29,6 +29,9 @@ class ReactorSftpClientParityTest {
             .map(Method::getName)
             .distinct()
             .filter(name -> !wrapped.contains(name))
+            // PENDING: session support lands in this wrapper with its own operations type. Remove
+            // this line when it does; until then the neutral client is reachable via unwrap().
+            .filter(name -> !Set.of("withSession", "openSession", "sessionContext").contains(name))
             .sorted()
             .toList();
 

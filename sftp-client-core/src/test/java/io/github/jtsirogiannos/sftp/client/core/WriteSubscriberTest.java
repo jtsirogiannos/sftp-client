@@ -56,7 +56,7 @@ public class WriteSubscriberTest {
                 StubSession session = new StubSession();
 
                 WriteSubscriber subscriber =
-                        new WriteSubscriber(out, session, pool, worker, result);
+                        new WriteSubscriber(out, () -> pool.discard(session), worker, result);
 
                 SubmissionPublisher<ByteBuffer> publisher = new SubmissionPublisher<>(worker, 16);
                 publisher.subscribe(subscriber);
@@ -106,7 +106,7 @@ public class WriteSubscriberTest {
             CompletableFuture<Void> result = new CompletableFuture<>();
 
             WriteSubscriber subscriber =
-                    new WriteSubscriber(out, new StubSession(), new StubPool(), worker, result);
+                    new WriteSubscriber(out, () -> { }, worker, result);
 
             // Capacity above CHUNKS on purpose: submit() blocks when the buffer fills, and after a
             // failure no more demand arrives - a smaller buffer deadlocks the test rather than the

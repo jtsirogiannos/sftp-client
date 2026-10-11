@@ -1,8 +1,6 @@
 package io.github.jtsirogiannos.sftp.client.core;
 
 import io.github.jtsirogiannos.sftp.client.api.SftpException;
-import io.github.jtsirogiannos.sftp.client.pool.SftpSessionPool;
-import io.github.jtsirogiannos.sftp.client.spi.SftpSession;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,8 +27,8 @@ final class WriteSubscriber implements Flow.Subscriber<ByteBuffer> {
     private static final Logger log = LoggerFactory.getLogger(WriteSubscriber.class);
 
     private final OutputStream out;
-    private final SftpSession session;
-    private final SftpSessionPool<SftpSession> pool;
+    /** Hands the session back once the transfer is over, however it ended. Runs exactly once. */
+    private final Runnable release;
     private final Executor worker;
     private final CompletableFuture<Void> result;
     private final AtomicBoolean finished = new AtomicBoolean();
@@ -52,11 +50,10 @@ final class WriteSubscriber implements Flow.Subscriber<ByteBuffer> {
      */
     private volatile CompletableFuture<Void> chain = CompletableFuture.completedFuture(null);
 
-    WriteSubscriber(OutputStream out, SftpSession session, SftpSessionPool<SftpSession> pool, Executor worker,
+    WriteSubscriber(OutputStream out, Runnable release, Executor worker,
                     CompletableFuture<Void> result) {
         this.out = out;
-        this.session = session;
-        this.pool = pool;
+        this.release = release;
         this.worker = worker;
         this.result = result;
         // Cancelling the returned CompletionStage has to reach the transfer, or the upload keeps
@@ -149,9 +146,9 @@ final class WriteSubscriber implements Flow.Subscriber<ByteBuffer> {
             return;
         }
         if (failure != null) {
-            log.debug("Upload failed; discarding the session", failure);
+            log.debug("Upload failed", failure);
         }
-        pool.discard(session); // mid-transfer session, never recycled
+        release.run();
         if (failure == null) {
             result.complete(null);
         } else {

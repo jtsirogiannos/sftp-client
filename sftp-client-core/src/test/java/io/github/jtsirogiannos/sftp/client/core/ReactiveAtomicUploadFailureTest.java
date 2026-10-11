@@ -1,6 +1,6 @@
 package io.github.jtsirogiannos.sftp.client.core;
 
-import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClient;
+import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpOperations;
 import io.github.jtsirogiannos.sftp.client.api.RemoteFile;
 import io.github.jtsirogiannos.sftp.client.api.SftpException;
 import io.github.jtsirogiannos.sftp.client.spi.SftpCapabilities;
@@ -94,7 +94,7 @@ public class ReactiveAtomicUploadFailureTest {
     }
 
     /** Only the four operations the default method composes actually do anything. */
-    private static final class StubReactiveClient implements ReactiveSftpClient {
+    private static final class StubReactiveClient implements ReactiveSftpOperations {
 
         final List<String> removed = new CopyOnWriteArrayList<>();
         RuntimeException uploadFailure;
@@ -192,8 +192,5 @@ public class ReactiveAtomicUploadFailureTest {
             throw new UnsupportedOperationException();
         }
 
-        @Override
-        public void close() {
-        }
     }
 }

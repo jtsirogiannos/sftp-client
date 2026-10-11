@@ -1,0 +1,199 @@
+package io.github.jtsirogiannos.sftp.client.core;
+
+import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpOperations;
+import io.github.jtsirogiannos.sftp.client.api.AttributeUpdate;
+import io.github.jtsirogiannos.sftp.client.api.FilesystemStats;
+import io.github.jtsirogiannos.sftp.client.api.RemoteFile;
+import io.github.jtsirogiannos.sftp.client.api.SftpException;
+import io.github.jtsirogiannos.sftp.client.pool.SftpSessionPool;
+import io.github.jtsirogiannos.sftp.client.spi.AsyncSftpProvider;
+import io.github.jtsirogiannos.sftp.client.spi.AsyncSftpSession;
+import io.github.jtsirogiannos.sftp.client.spi.SftpCapabilities;
+import io.github.jtsirogiannos.sftp.client.spi.SftpSession;
+
+import java.nio.ByteBuffer;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Flow;
+import java.util.function.Function;
+
+/**
+ * The thread-free reactive operations with no session in sight: borrow, issue, settle — what
+ * {@link AsyncReactiveSftpClient} does when no session is current, moved here unchanged.
+ */
+final class PerCallAsyncReactiveSftpOperations implements ReactiveSftpOperations {
+
+    private final AsyncSftpProvider provider;
+    private final SftpSessionPool<AsyncSftpSession> pool;
+    private final Executor worker;
+
+    PerCallAsyncReactiveSftpOperations(AsyncSftpProvider provider,
+            SftpSessionPool<AsyncSftpSession> pool, Executor worker) {
+        this.provider = provider;
+        this.pool = pool;
+        this.worker = worker;
+    }
+
+    @Override
+    public CompletionStage<List<RemoteFile>> list(String path) {
+        return onSession(session -> session.listAsync(path));
+    }
+
+    @Override
+    public CompletionStage<RemoteFile> stat(String path) {
+        return onSession(session -> session.statAsync(path));
+    }
+
+    @Override
+    public CompletionStage<Boolean> exists(String path) {
+        return onSession(session -> session.existsAsync(path));
+    }
+
+    @Override
+    public CompletionStage<Void> mkdir(String path) {
+        return onSession(session -> session.mkdirAsync(path));
+    }
+
+    @Override
+    public CompletionStage<Void> rename(String from, String to) {
+        return onSession(session -> session.renameAsync(from, to));
+    }
+
+    @Override
+    public CompletionStage<Void> remove(String path) {
+        return onSession(session -> session.removeAsync(path));
+    }
+
+    @Override
+    public CompletionStage<RemoteFile> lstat(String path) {
+        return onSession(session -> session.lstatAsync(path));
+    }
+
+    @Override
+    public CompletionStage<String> realpath(String path) {
+        return onSession(session -> session.realpathAsync(path));
+    }
+
+    @Override
+    public CompletionStage<Void> symlink(String linkPath, String targetPath) {
+        return onSession(session -> session.symlinkAsync(linkPath, targetPath));
+    }
+
+    @Override
+    public CompletionStage<String> readlink(String linkPath) {
+        return onSession(session -> session.readlinkAsync(linkPath));
+    }
+
+    @Override
+    public CompletionStage<Void> hardlink(String linkPath, String targetPath) {
+        return onSession(session -> session.hardlinkAsync(linkPath, targetPath));
+    }
+
+    @Override
+    public CompletionStage<Void> setAttributes(String path, AttributeUpdate update) {
+        return onSession(session -> session.setAttributesAsync(path, update));
+    }
+
+    @Override
+    public CompletionStage<FilesystemStats> statvfs(String path) {
+        return onSession(session -> session.statvfsAsync(path));
+    }
+
+    @Override
+    public Flow.Publisher<ByteBuffer> download(String remotePath, long fromOffset) {
+        // Borrowed lazily on subscribe, so a publisher nobody subscribes to costs nothing.
+        return new AsyncDownloadPublisher(remotePath, fromOffset, () -> pool.borrowAsync(worker),
+            pool::discard);
+    }
+
+    @Override
+    public CompletionStage<Void> upload(String remotePath, Flow.Publisher<ByteBuffer> data,
+            SftpSession.WriteMode mode) {
+        CompletableFuture<Void> result = new CompletableFuture<>();
+        pool.borrowAsync(worker).whenComplete((session, borrowFailure) -> {
+            if (borrowFailure != null) {
+                result.completeExceptionally(unwrap(borrowFailure));
+                return;
+            }
+            if (result.isDone()) {
+                // Cancelled while the borrow was in flight. Hand the session straight back rather
+                // than opening a remote file for a transfer nobody is waiting for.
+                pool.discard(session);
+                return;
+            }
+            try {
+                session.writeAsync(remotePath, data, mode)
+                    .whenComplete((ignored, failure) -> {
+                        // Mid-transfer on every route, so the session never goes back to the pool.
+                        pool.discard(session);
+                        if (failure == null) {
+                            result.complete(null);
+                        } else {
+                            result.completeExceptionally(unwrap(failure));
+                        }
+                    });
+            } catch (RuntimeException e) {
+                pool.discard(session);
+                result.completeExceptionally(unwrap(e));
+            }
+        });
+        return result;
+    }
+
+    @Override
+    public SftpCapabilities capabilities() {
+        return provider.capabilities();
+    }
+
+
+    /**
+     * Borrows, issues, and settles the session on completion.
+     *
+     * <p>Nothing here hops threads. Issuing does not block, so it runs wherever the borrow completed
+     * — often the caller's own thread, since a warm pool answers inline.
+     */
+    private <T> CompletionStage<T> onSession(Function<AsyncSftpSession, CompletionStage<T>> op) {
+        CompletableFuture<T> future = new CompletableFuture<>();
+        pool.borrowAsync(worker).whenComplete((session, borrowFailure) -> {
+            if (borrowFailure != null) {
+                future.completeExceptionally(unwrap(borrowFailure));
+                return;
+            }
+            try {
+                op.apply(session).whenComplete((value, failure) -> {
+                    if (failure == null) {
+                        pool.recycle(session);
+                        future.complete(value);
+                    } else {
+                        pool.discard(session);
+                        future.completeExceptionally(unwrap(failure));
+                    }
+                });
+            } catch (RuntimeException e) {
+                // A provider that throws instead of returning a failed stage still must not leak
+                // the session.
+                pool.discard(session);
+                future.completeExceptionally(unwrap(e));
+            }
+        });
+        return future;
+    }
+
+    /**
+     * Normalises a failure to {@link SftpException}, matching what the blocking client produces.
+     *
+     * <p>Callers must not be able to tell which kind of provider they were given from the exception
+     * they catch — that would make an implementation detail part of the API. The
+     * {@link CompletionException} unwrapping matters for the same reason: a stage that failed through
+     * a dependent step arrives wrapped, and a directly-failed one does not.
+     */
+    private static Throwable unwrap(Throwable failure) {
+        Throwable cause = failure instanceof CompletionException && failure.getCause() != null
+            ? failure.getCause()
+            : failure;
+        return cause instanceof SftpException ? cause : new SftpException("operation failed", cause);
+    }
+}

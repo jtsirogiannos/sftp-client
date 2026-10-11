@@ -139,19 +139,19 @@ public final class SftpClients {
     }
 
     private static ReactiveSftpClient buildReactive(String providerName, SftpConnectionConfig config,
-            Executor worker, PoolSettings pool) {
+            Executor worker, PoolSettings pool, SftpSessionContext sessionContext) {
         SftpProvider provider = provider(providerName);
         if (provider instanceof AsyncSftpProvider asyncProvider) {
             log.debug("Creating an async reactive client for {} using provider '{}'", config,
                 providerName);
             return new AsyncReactiveSftpClient(asyncProvider,
                 BoundedSftpSessionPool.async(asyncProvider, config, pool.maxSize(), pool.maxIdle(),
-                    pool.acquireTimeout()), worker);
+                    pool.acquireTimeout()), worker, sessionContext);
         }
         log.debug("Creating a reactive client for {} using provider '{}'", config, providerName);
         return new DefaultReactiveSftpClient(provider,
             BoundedSftpSessionPool.blocking(provider, config, pool.maxSize(), pool.maxIdle(),
-                pool.acquireTimeout()), worker);
+                pool.acquireTimeout()), worker, sessionContext);
     }
 
     /**
@@ -199,7 +199,7 @@ public final class SftpClients {
 
         public ReactiveSftpClient reactive(Executor worker) {
             return buildReactive(providerName, requireConfig(), Objects.requireNonNull(worker, "worker"),
-                    pool);
+                    pool, sessionContext);
         }
 
         private SftpConnectionConfig requireConfig() {

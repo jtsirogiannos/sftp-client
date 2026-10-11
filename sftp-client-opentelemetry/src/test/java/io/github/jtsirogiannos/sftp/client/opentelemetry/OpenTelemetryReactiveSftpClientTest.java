@@ -132,6 +132,33 @@ class OpenTelemetryReactiveSftpClientTest {
         assertThat(only("sftp.download").getAttributes().get(SftpAttributes.FILE_SIZE)).isEqualTo(48L);
     }
 
+    /** A reactive unit of work becomes one session span, its operations beneath it. */
+    @Test
+    void nestsAReactiveUnitOfWorkUnderOneSessionSpan() throws Exception {
+        await(client.withSession(ops -> ops.mkdir("/upload/rx-unit")
+            .thenCompose(v -> ops.exists("/upload/rx-unit"))));
+
+        SpanData session = only("sftp.session");
+        assertThat(session.getKind().name()).isEqualTo("INTERNAL");
+        assertThat(spans.getFinishedSpanItems().stream()
+            .filter(s -> s.getParentSpanId().equals(session.getSpanId())).map(SpanData::getName))
+            .containsExactlyInAnyOrder("sftp.mkdir", "sftp.exists");
+    }
+
+    @Test
+    void anOpenReactiveSessionHasOneSpanFromOpenToClose() throws Exception {
+        var opened = await(client.openSession());
+        await(opened.mkdir("/upload/rx-opened"));
+        assertThat(spans.getFinishedSpanItems()).extracting(SpanData::getName)
+            .describedAs("still open, so its span has not ended")
+            .doesNotContain("sftp.session");
+        await(opened.close());
+        await(opened.close());
+
+        SpanData session = only("sftp.session");
+        assertThat(only("sftp.mkdir").getParentSpanId()).isEqualTo(session.getSpanId());
+    }
+
     @Test
     void doesNotEmitASpanForADownloadNobodySubscribedTo() {
         client.download("/upload/never.bin");
@@ -164,6 +191,9 @@ class OpenTelemetryReactiveSftpClientTest {
         @Override public Flow.Publisher<ByteBuffer> download(String p, long o) { return delegate.download(p, o); }
         @Override public CompletionStage<Void> upload(String p, Flow.Publisher<ByteBuffer> d, io.github.jtsirogiannos.sftp.client.spi.SftpSession.WriteMode m) { return delegate.upload(p, d, m); }
         @Override public io.github.jtsirogiannos.sftp.client.spi.SftpCapabilities capabilities() { return delegate.capabilities(); }
+        @Override public <R> CompletionStage<R> withSession(java.util.function.Function<io.github.jtsirogiannos.sftp.client.api.ReactiveSftpOperations, ? extends CompletionStage<R>> w) { return delegate.withSession(w); }
+        @Override public CompletionStage<io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClientSession> openSession() { return delegate.openSession(); }
+        @Override public io.github.jtsirogiannos.sftp.client.context.SftpSessionContext sessionContext() { return delegate.sessionContext(); }
         @Override public void close() { delegate.close(); }
     }
 

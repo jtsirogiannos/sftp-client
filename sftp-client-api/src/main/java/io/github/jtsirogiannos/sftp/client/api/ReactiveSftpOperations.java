@@ -18,7 +18,7 @@ import java.util.concurrent.Flow;
  * {@link CompletionStage} and {@link Flow.Publisher}.
  *
  * <p>Two things implement it. {@link ReactiveSftpClient} borrows a pooled session per call and is
- * safe to share; a session is pinned to one connection until closed.
+ * safe to share; a {@link ReactiveSftpClientSession} is pinned to one connection until closed.
  * Splitting it out is what lets a unit of work hand its block exactly these operations and nothing
  * that belongs to owning a pool.
  *
