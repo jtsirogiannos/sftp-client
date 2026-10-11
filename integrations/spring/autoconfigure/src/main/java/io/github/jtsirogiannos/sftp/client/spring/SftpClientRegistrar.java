@@ -1,9 +1,14 @@
 package io.github.jtsirogiannos.sftp.client.spring;
 
+import io.github.jtsirogiannos.sftp.client.api.MultiTenantReactiveSftpClient;
+import io.github.jtsirogiannos.sftp.client.api.MultiTenantSftpClient;
 import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClient;
 import io.github.jtsirogiannos.sftp.client.api.SftpClient;
 import io.github.jtsirogiannos.sftp.client.api.SftpConnectionConfig;
+import io.github.jtsirogiannos.sftp.client.api.TenantResolver;
 import io.github.jtsirogiannos.sftp.client.core.SftpClients;
+import io.github.jtsirogiannos.sftp.client.tenancy.SftpTenantProvider;
+import io.github.jtsirogiannos.sftp.client.tenancy.TenantContext;
 
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanFactory;
@@ -28,6 +33,13 @@ import java.util.concurrent.Executor;
  * <p>Injection therefore looks like {@code @Qualifier("sftpClient-bank-a") SftpClient client}. When
  * exactly one endpoint is configured its beans are also marked primary, so the overwhelmingly common
  * single-endpoint case is a plain {@code @Autowired SftpClient} with no qualifier at all.
+ *
+ * <p><strong>Tenancy.</strong> With {@code sftp.endpoints.<name>.tenancy.enabled=true} the two beans
+ * are a {@link MultiTenantSftpClient} and a {@link MultiTenantReactiveSftpClient} instead — still
+ * injectable as the plain types. How tenants are isolated comes from an {@code SftpTenantProvider}
+ * bean, named {@code sftpTenantProvider-<name>} or the only one, else from
+ * {@code tenancy.root-directory}; which tenant is current from a {@code TenantResolver} bean, named
+ * {@code tenantResolver-<name>} or the only one, else {@link TenantContext}.
  *
  * <p><strong>Why a {@link BeanDefinitionRegistryPostProcessor} and not a {@code @Bean} method.</strong>
  * The number of beans depends on configuration, so the definitions have to be contributed before the
@@ -84,11 +96,95 @@ public class SftpClientRegistrar implements BeanDefinitionRegistryPostProcessor,
                         "sftp.endpoints." + name + " is misconfigured: " + e.getMessage(), e);
             }
 
+            if (endpoint.getTenancy().isEnabled()) {
+                Tenancy tenancy = tenancy(name, endpoint);
+                registry.registerBeanDefinition("sftpClient-" + name,
+                        multiTenantDefinition(providerName, config, pool, tenancy, single));
+                registry.registerBeanDefinition("reactiveSftpClient-" + name,
+                        multiTenantReactiveDefinition(providerName, config, pool, tenancy, single));
+                continue;
+            }
             registry.registerBeanDefinition("sftpClient-" + name,
                     blockingDefinition(providerName, config, pool, single));
             registry.registerBeanDefinition("reactiveSftpClient-" + name,
                     reactiveDefinition(providerName, config, pool, single));
         }
+    }
+
+    /** What an endpoint's tenants need, gathered and checked while definitions are registered. */
+    private record Tenancy(String endpoint, String rootDirectoryTemplate,
+            io.github.jtsirogiannos.sftp.client.pool.PoolSettings tenantPool) {
+    }
+
+    /**
+     * Checked now, so that a tenancy that could never work stops the context from starting: either a
+     * root directory template, or an {@code SftpTenantProvider} bean, must say how tenants are
+     * isolated. User beans are already defined when this runs, since configuration classes are parsed
+     * first.
+     */
+    private Tenancy tenancy(String name, SftpClientProperties.Endpoint endpoint) {
+        String template = endpoint.getTenancy().getRootDirectory();
+        try {
+            if (template != null) {
+                SftpTenantProvider.rootDirectoryTemplate(template);
+            } else if (beanFactory.getBeanNamesForType(SftpTenantProvider.class, true, false).length == 0) {
+                throw new IllegalArgumentException("tenancy is enabled but nothing says how tenants are "
+                        + "isolated: set sftp.endpoints." + name + ".tenancy.root-directory, or define an "
+                        + "SftpTenantProvider bean (named sftpTenantProvider-" + name + " if there are several)");
+            }
+            return new Tenancy(name, template, Mappers.toTenantPoolSettings(endpoint));
+        } catch (RuntimeException e) {
+            throw new IllegalStateException(
+                    "sftp.endpoints." + name + " is misconfigured: " + e.getMessage(), e);
+        }
+    }
+
+    /** The endpoint's own provider bean, else the only one, else its root directory template. */
+    private SftpTenantProvider tenantProvider(Tenancy tenancy) {
+        String named = "sftpTenantProvider-" + tenancy.endpoint();
+        if (beanFactory.containsBean(named)) {
+            return beanFactory.getBean(named, SftpTenantProvider.class);
+        }
+        SftpTenantProvider unique = beanFactory.getBeanProvider(SftpTenantProvider.class).getIfUnique();
+        return unique != null ? unique : SftpTenantProvider.rootDirectoryTemplate(tenancy.rootDirectoryTemplate());
+    }
+
+    /** The endpoint's own resolver bean, else the only one, else {@link TenantContext}. */
+    private TenantResolver tenantResolver(Tenancy tenancy) {
+        String named = "tenantResolver-" + tenancy.endpoint();
+        if (beanFactory.containsBean(named)) {
+            return beanFactory.getBean(named, TenantResolver.class);
+        }
+        TenantResolver unique = beanFactory.getBeanProvider(TenantResolver.class).getIfUnique();
+        return unique != null ? unique : TenantContext.resolver();
+    }
+
+    private RootBeanDefinition multiTenantDefinition(String provider, SftpConnectionConfig config,
+            io.github.jtsirogiannos.sftp.client.pool.PoolSettings pool, Tenancy tenancy, boolean primary) {
+        RootBeanDefinition definition = new RootBeanDefinition(MultiTenantSftpClient.class);
+        definition.setInstanceSupplier(() -> SftpClients.multiTenant(provider, config)
+                .pool(pool)
+                .tenantPool(tenancy.tenantPool())
+                .tenants(tenantProvider(tenancy))
+                .tenantResolver(tenantResolver(tenancy))
+                .build());
+        definition.setDestroyMethodName("close");
+        definition.setPrimary(primary);
+        return definition;
+    }
+
+    private RootBeanDefinition multiTenantReactiveDefinition(String provider, SftpConnectionConfig config,
+            io.github.jtsirogiannos.sftp.client.pool.PoolSettings pool, Tenancy tenancy, boolean primary) {
+        RootBeanDefinition definition = new RootBeanDefinition(MultiTenantReactiveSftpClient.class);
+        definition.setInstanceSupplier(() -> SftpClients.multiTenant(provider, config)
+                .pool(pool)
+                .tenantPool(tenancy.tenantPool())
+                .tenants(tenantProvider(tenancy))
+                .tenantResolver(tenantResolver(tenancy))
+                .buildReactive(beanFactory.getBean(WORKER_EXECUTOR_BEAN, Executor.class)));
+        definition.setDestroyMethodName("close");
+        definition.setPrimary(primary);
+        return definition;
     }
 
     @Override

@@ -134,6 +134,62 @@ public class SftpClientProperties {
             return pool;
         }
 
+        /**
+         * Multi-tenancy for this endpoint, bound from {@code sftp.endpoints.<name>.tenancy.*}. When
+         * enabled, the endpoint's beans are a {@code MultiTenantSftpClient} and a
+         * {@code MultiTenantReactiveSftpClient}, still injectable as the plain client types.
+         */
+        private final Tenancy tenancy = new Tenancy();
+
+        public Tenancy getTenancy() {
+            return tenancy;
+        }
+
+        public static class Tenancy {
+
+            /** Serve many tenants through this endpoint. */
+            private boolean enabled;
+
+            /**
+             * Confine each tenant to a directory on this endpoint's connection: an absolute path
+             * containing {@code {tenant}}, such as {@code /tenants/{tenant}}. Used when no
+             * {@code SftpTenantProvider} bean decides instead.
+             */
+            private String rootDirectory;
+
+            /**
+             * The pool each tenant with a connection of its own gets — two sessions by default,
+             * since there is one pool per tenant.
+             */
+            private final Pool pool = defaultTenantPool();
+
+            private static Pool defaultTenantPool() {
+                Pool pool = new Pool();
+                pool.setMaxSize(2);
+                return pool;
+            }
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public String getRootDirectory() {
+                return rootDirectory;
+            }
+
+            public void setRootDirectory(String rootDirectory) {
+                this.rootDirectory = rootDirectory;
+            }
+
+            public Pool getPool() {
+                return pool;
+            }
+        }
+
         public static class Pool {
 
             private int maxSize = 8;

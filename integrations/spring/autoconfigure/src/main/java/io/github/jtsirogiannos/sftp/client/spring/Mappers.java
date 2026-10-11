@@ -35,6 +35,13 @@ final class Mappers {
             pool.getMaxSize(), pool.getMaxIdle(), pool.getAcquireTimeout());
     }
 
+    static io.github.jtsirogiannos.sftp.client.pool.PoolSettings toTenantPoolSettings(
+            SftpClientProperties.Endpoint endpoint) {
+        SftpClientProperties.Endpoint.Pool pool = endpoint.getTenancy().getPool();
+        return new io.github.jtsirogiannos.sftp.client.pool.PoolSettings(
+            pool.getMaxSize(), pool.getMaxIdle(), pool.getAcquireTimeout());
+    }
+
     static SftpConnectionConfig toConfig(SftpClientProperties.Endpoint endpoint) {
         SftpConnectionConfig.Builder builder = SftpConnectionConfig.builder()
             .host(endpoint.getHost())
