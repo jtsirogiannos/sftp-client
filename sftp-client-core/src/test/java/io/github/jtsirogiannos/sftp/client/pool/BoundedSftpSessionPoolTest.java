@@ -186,6 +186,33 @@ public class BoundedSftpSessionPoolTest {
         }
     }
 
+    /**
+     * The same eviction on request, for an owner whose pools see no traffic of their own — and only
+     * of what is parked: a session in use is never closed out from under its borrower.
+     */
+    @Test
+    public void evictsExpiredSessionsOnRequestWithoutWaitingForTraffic() throws Exception {
+        CountingProvider provider = new CountingProvider();
+        try (BoundedSftpSessionPool<SftpSession> pool =
+                     pool(provider, 4, Duration.ofMillis(50), SHORT_WAIT)) {
+            FakeSession parked = (FakeSession) pool.borrow();
+            FakeSession inUse = (FakeSession) pool.borrow();
+            pool.recycle(parked);
+
+            assertThat(pool.evictExpired()).describedAs("nothing is stale yet").isZero();
+            Thread.sleep(150); // outlive maxIdle
+
+            assertThat(pool.evictExpired()).isEqualTo(1);
+            assertThat(parked.closed).isTrue();
+            assertThat(inUse.closed).describedAs("checked out, so not the pool's to close").isFalse();
+            assertThat(pool.idleSessions()).isZero();
+            assertThat(pool.liveSessions()).describedAs("only the borrowed one remains").isEqualTo(1);
+
+            pool.recycle(inUse);
+            assertThat(pool.borrow()).describedAs("still usable afterwards").isSameAs(inUse);
+        }
+    }
+
     /** Closing the pool closes what it holds; a borrow afterwards fails rather than reconnecting. */
     @Test
     public void closeReleasesPooledSessionsAndRefusesFurtherBorrows() {

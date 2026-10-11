@@ -383,6 +383,39 @@ public final class BoundedSftpSessionPool<S extends SftpSessionLifecycle>
         toClose.forEach(BoundedSftpSessionPool::closeQuietly);
     }
 
+    /**
+     * Closes parked sessions idle beyond {@code maxIdle} now, instead of on this pool's next borrow
+     * or recycle.
+     *
+     * <p>Eviction otherwise runs only on this pool's own traffic, which is right for one pool per
+     * endpoint and wrong for an owner of many: a process holding a pool per tenant has pools that see
+     * nothing for hours, each keeping its parked sockets open the whole time. Such an owner calls this
+     * on its own aggregate traffic. Sessions checked out are untouched, and the pool stays usable.
+     *
+     * @return how many sessions were closed
+     */
+    public int evictExpired() {
+        List<S> expired;
+        lock.lock();
+        try {
+            if (closed) {
+                return 0;
+            }
+            // No waiter needs waking: a borrower only waits when nothing is parked, and everything
+            // evicted here was parked.
+            expired = takeExpiredLocked();
+        } finally {
+            lock.unlock();
+        }
+        if (!expired.isEmpty()) {
+            log.debug("Evicting {} session(s) idle beyond {}ms on request", expired.size(),
+                    Duration.ofNanos(maxIdleNanos).toMillis());
+            expired.forEach(session -> notifyListeners(SftpSessionPoolListener::sessionEvicted));
+            expired.forEach(BoundedSftpSessionPool::closeQuietly);
+        }
+        return expired.size();
+    }
+
     /** Live sessions, parked plus checked out. For tests and diagnostics. */
     public int liveSessions() {
         lock.lock();

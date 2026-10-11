@@ -99,6 +99,28 @@ public final class SftpConnectionConfig {
         return new Builder();
     }
 
+    /**
+     * A builder holding this config's values, to derive a variant from it — per-tenant credentials
+     * over a shared host, say.
+     *
+     * <p>The secrets are copied, so wiping this config's arrays, the builder's, or the derived
+     * config's leaves the others intact.
+     */
+    public Builder toBuilder() {
+        Builder builder = new Builder();
+        builder.host = host;
+        builder.port = port;
+        builder.username = username;
+        builder.password = password == null ? null : password.clone();
+        builder.privateKey = privateKey;
+        builder.passphrase = passphrase == null ? null : passphrase.clone();
+        builder.hostKeyStrategy = hostKeyStrategy;
+        builder.knownHosts = knownHosts;
+        builder.connectTimeout = connectTimeout;
+        builder.requestTimeout = requestTimeout;
+        return builder;
+    }
+
     public String host() {
         return host;
     }
