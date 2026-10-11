@@ -46,6 +46,19 @@ public final class SessionBindings {
         return new SessionBindings(Map.copyOf(copy));
     }
 
+    /**
+     * A new snapshot without whatever {@code key} named — how a context whose bindings outlive a
+     * single call ends one binding without disturbing others made meanwhile.
+     */
+    public SessionBindings without(SessionKey<?> key) {
+        if (!sessions.containsKey(key)) {
+            return this;
+        }
+        Map<SessionKey<?>, Object> copy = new HashMap<>(sessions);
+        copy.remove(key);
+        return copy.isEmpty() ? EMPTY : new SessionBindings(Map.copyOf(copy));
+    }
+
     public boolean isEmpty() {
         return sessions.isEmpty();
     }

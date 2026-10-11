@@ -1,18 +1,12 @@
 package io.github.jtsirogiannos.sftp.client.quarkus.runtime;
 
-import java.nio.ByteBuffer;
-import java.util.List;
-import java.util.Optional;
-import java.util.function.Predicate;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
-import io.github.jtsirogiannos.sftp.client.api.AttributeUpdate;
-import io.github.jtsirogiannos.sftp.client.api.FilesystemStats;
 import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClient;
-import io.github.jtsirogiannos.sftp.client.api.RemoteFile;
-import io.github.jtsirogiannos.sftp.client.spi.SftpCapabilities;
-import io.smallrye.mutiny.Multi;
+import io.github.jtsirogiannos.sftp.client.context.SftpSessionContext;
 import io.smallrye.mutiny.Uni;
-import io.vertx.core.buffer.Buffer;
 
 /**
  * Mutiny-flavoured view of the neutral {@link ReactiveSftpClient}.
@@ -23,17 +17,30 @@ import io.vertx.core.buffer.Buffer;
  * directly, and the only real work is converting {@link ByteBuffer} to Vert.x {@link Buffer}
  * at the edge.
  *
+ * <h2>Units of work</h2>
+ *
+ * <p>{@link #withSession} runs a unit of work over one connection, as Hibernate Reactive Panache's
+ * {@code @WithSession} does for a database session: the session is kept on the request's Vert.x
+ * duplicated context until the work's {@code Uni} completes, and every operation emits back on that
+ * context, so a call on this client anywhere in the pipeline joins it.
+ *
  * <p>If this file ever grows past trivial conversion, framework concepts have leaked into the core.
  * Growing <em>wider</em> is expected, though: every operation the neutral client gains must appear
  * here as another one-line delegation, because this bean is the only reactive surface a Quarkus
  * application sees. {@link #unwrap()} is the safety valve for the gap between those catch-ups.
  */
-public class MutinySftpClient implements AutoCloseable {
+public class MutinySftpClient extends MutinySftpOperations implements AutoCloseable {
 
     private final ReactiveSftpClient delegate;
 
     public MutinySftpClient(ReactiveSftpClient delegate) {
+        super(delegate);
         this.delegate = delegate;
+    }
+
+    /** For CDI's client proxy only; see {@link MutinySftpOperations#MutinySftpOperations()}. */
+    protected MutinySftpClient() {
+        this.delegate = null;
     }
 
     /**
@@ -45,118 +52,46 @@ public class MutinySftpClient implements AutoCloseable {
         return delegate;
     }
 
-    public Uni<List<RemoteFile>> list(String path) {
-        return Uni.createFrom().completionStage(() -> delegate.list(path));
-    }
-
-    public Uni<RemoteFile> stat(String path) {
-        return Uni.createFrom().completionStage(() -> delegate.stat(path));
-    }
-
-    public Uni<Boolean> exists(String path) {
-        return Uni.createFrom().completionStage(() -> delegate.exists(path));
-    }
-
-    public Uni<Void> mkdir(String path) {
-        return Uni.createFrom().completionStage(() -> delegate.mkdir(path));
-    }
-
-    public Uni<Void> rename(String from, String to) {
-        return Uni.createFrom().completionStage(() -> delegate.rename(from, to));
-    }
-
-    public Uni<Void> remove(String path) {
-        return Uni.createFrom().completionStage(() -> delegate.remove(path));
-    }
-
-    /** Attributes without following symlinks — what a tree walk must use. */
-    public Uni<RemoteFile> lstat(String path) {
-        return Uni.createFrom().completionStage(() -> delegate.lstat(path));
-    }
-
-    public Uni<String> realpath(String path) {
-        return Uni.createFrom().completionStage(() -> delegate.realpath(path));
-    }
-
-    public Uni<Void> symlink(String linkPath, String targetPath) {
-        return Uni.createFrom().completionStage(() -> delegate.symlink(linkPath, targetPath));
-    }
-
-    public Uni<String> readlink(String linkPath) {
-        return Uni.createFrom().completionStage(() -> delegate.readlink(linkPath));
-    }
-
-    public Uni<Void> hardlink(String linkPath, String targetPath) {
-        return Uni.createFrom().completionStage(() -> delegate.hardlink(linkPath, targetPath));
-    }
-
-    public Uni<Void> setAttributes(String path, AttributeUpdate update) {
-        return Uni.createFrom().completionStage(() -> delegate.setAttributes(path, update));
-    }
-
-    public Uni<FilesystemStats> statvfs(String path) {
-        return Uni.createFrom().completionStage(() -> delegate.statvfs(path));
-    }
-
-    /** {@code mkdir -p}. An existing chain is not an error. */
-    public Uni<Void> mkdirs(String path) {
-        return Uni.createFrom().completionStage(() -> delegate.mkdirs(path));
-    }
-
-    /** Deletes a tree, removing symlinks as links, never following them. */
-    public Uni<Integer> deleteRecursively(String path) {
-        return Uni.createFrom().completionStage(() -> delegate.deleteRecursively(path));
-    }
-
-    public Uni<Void> chmod(String path, int mode) {
-        return Uni.createFrom().completionStage(() -> delegate.chmod(path, mode));
-    }
-
-    /** Directory entries matching {@code filter}, filtered client-side. */
-    public Uni<List<RemoteFile>> list(String path, Predicate<RemoteFile> filter) {
-        return Uni.createFrom().completionStage(() -> delegate.list(path, filter));
-    }
-
-    public Uni<Optional<RemoteFile>> findFirst(String path, Predicate<RemoteFile> match) {
-        return Uni.createFrom().completionStage(() -> delegate.findFirst(path, match));
-    }
-
-    public Multi<Buffer> download(String remotePath) {
-        return Multi.createFrom().publisher(delegate.download(remotePath))
-                .map(MutinySftpClient::toVertxBuffer);
-    }
-
-    /** As {@link #download(String)}, starting at {@code fromOffset} — the resume primitive. */
-    public Multi<Buffer> download(String remotePath, long fromOffset) {
-        return Multi.createFrom().publisher(delegate.download(remotePath, fromOffset))
-                .map(MutinySftpClient::toVertxBuffer);
-    }
-
-    public Uni<Void> upload(String remotePath, Multi<Buffer> data) {
-        // Multi IS a Flow.Publisher in Mutiny 2, so this hands straight through.
-        return Uni.createFrom().completionStage(
-                () -> delegate.upload(remotePath, data.map(b -> ByteBuffer.wrap(b.getBytes()))));
-    }
-
-    /** As {@link #upload(String, Multi)}, with explicit write semantics. */
-    public Uni<Void> upload(String remotePath, Multi<Buffer> data,
-            io.github.jtsirogiannos.sftp.client.spi.SftpSession.WriteMode mode) {
-        return Uni.createFrom().completionStage(
-                () -> delegate.upload(remotePath, data.map(b -> ByteBuffer.wrap(b.getBytes())), mode));
-    }
-
     /**
-     * Publishes by rename, so a reader watching the destination never sees a partial file.
-     * Replacing an existing file needs SFTP v5+ rename semantics and fails on a v3 server rather
-     * than degrading — see the neutral client's documentation.
+     * Runs a unit of work over one connection, with that session current until the work's
+     * {@code Uni} completes.
+     *
+     * <pre>{@code
+     * client.withSession(ops -> ops.mkdirs("/outbound/2026/10")
+     *         .chain(() -> ops.upload("/outbound/2026/10/report.csv", data))
+     *         .chain(() -> archiver.archive()));   // calls on the client inside join this session
+     * }</pre>
+     *
+     * <p>A nested {@code withSession} joins. The work's own failure propagates unchanged; the
+     * connection goes back to the pool if it is still sound. Cancelling the returned {@code Uni}
+     * cancels the work, and then the connection is handed back.
      */
-    public Uni<Void> uploadAtomically(String remotePath, Multi<Buffer> data) {
-        return Uni.createFrom().completionStage(
-                () -> delegate.uploadAtomically(remotePath, data.map(b -> ByteBuffer.wrap(b.getBytes()))));
+    public <R> Uni<R> withSession(Function<MutinySftpOperations, Uni<R>> work) {
+        return Uni.createFrom().deferred(() -> {
+            AtomicReference<CompletableFuture<R>> running = new AtomicReference<>();
+            Uni<R> outcome = call(() -> delegate.<R>withSession(operations -> {
+                CompletableFuture<R> future = work.apply(new MutinySftpOperations(operations))
+                        .subscribeAsCompletionStage();
+                running.set(future);
+                return future;
+            }));
+            return outcome.onCancellation().invoke(() -> {
+                CompletableFuture<R> future = running.get();
+                if (future != null) {
+                    future.cancel(true); // cancels the work's subscription
+                }
+            });
+        });
     }
 
-    public SftpCapabilities capabilities() {
-        return delegate.capabilities();
+    /** Opens a session the caller manages; never current, never joined. */
+    public Uni<MutinySftpSession> openSession() {
+        return call(delegate::openSession).map(MutinySftpSession::new);
+    }
+
+    /** Where the underlying client looks for its current session. */
+    public SftpSessionContext sessionContext() {
+        return delegate.sessionContext();
     }
 
     /**
@@ -168,11 +103,5 @@ public class MutinySftpClient implements AutoCloseable {
     @Override
     public void close() {
         delegate.close();
-    }
-
-    private static Buffer toVertxBuffer(ByteBuffer bb) {
-        byte[] bytes = new byte[bb.remaining()];
-        bb.get(bytes);
-        return Buffer.buffer(bytes);
     }
 }

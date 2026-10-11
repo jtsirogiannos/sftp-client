@@ -43,7 +43,13 @@ public class SftpClientRecorder {
             String name, String provider) {
         return context -> {
             SftpRuntimeConfig.EndpointRuntimeConfig endpoint = endpoint(config.getValue(), name);
-            return SftpClients.blocking(provider, connectionConfig(endpoint, name), poolSettings(endpoint));
+            // The current session lives on the request's duplicated context, as Hibernate Reactive's
+            // does, falling back to a thread local off it.
+            return SftpClients.builder(provider)
+                    .config(connectionConfig(endpoint, name))
+                    .pool(poolSettings(endpoint))
+                    .sessionContext(VertxSftpSessionContext.instance())
+                    .blocking();
         };
     }
 
@@ -54,10 +60,12 @@ public class SftpClientRecorder {
     public Function<SyntheticCreationalContext<MutinySftpClient>, MutinySftpClient> mutinyClient(
             String name, String provider, Executor worker) {
         return context -> {
-            ReactiveSftpClient delegate =
-                    SftpClients.reactive(provider,
-                            connectionConfig(endpoint(config.getValue(), name), name), worker,
-                            poolSettings(endpoint(config.getValue(), name)));
+            SftpRuntimeConfig.EndpointRuntimeConfig endpoint = endpoint(config.getValue(), name);
+            ReactiveSftpClient delegate = SftpClients.builder(provider)
+                    .config(connectionConfig(endpoint, name))
+                    .pool(poolSettings(endpoint))
+                    .sessionContext(VertxSftpSessionContext.instance())
+                    .reactive(worker);
             return new MutinySftpClient(delegate);
         };
     }

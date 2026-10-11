@@ -1,10 +1,15 @@
 package io.github.jtsirogiannos.sftp.client.quarkus.deployment;
 
 import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClient;
+import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClientSession;
+import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpOperations;
 import io.github.jtsirogiannos.sftp.client.quarkus.runtime.MutinySftpClient;
+import io.github.jtsirogiannos.sftp.client.quarkus.runtime.MutinySftpOperations;
+import io.github.jtsirogiannos.sftp.client.quarkus.runtime.MutinySftpSession;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
@@ -27,25 +32,37 @@ import static org.assertj.core.api.Assertions.assertThat;
 class MutinySftpClientParityTest {
 
     @Test
-    void coversEveryNeutralOperationByName() {
-        Set<String> wrapped = Arrays.stream(MutinySftpClient.class.getDeclaredMethods())
+    void operationsCoverEveryNeutralOperationByName() {
+        assertCovered(Arrays.asList(ReactiveSftpOperations.class.getMethods()), MutinySftpOperations.class);
+    }
+
+    @Test
+    void theClientCoversEveryNeutralClientMethodByName() {
+        assertCovered(Arrays.asList(ReactiveSftpClient.class.getDeclaredMethods()), MutinySftpClient.class);
+    }
+
+    @Test
+    void theSessionCoversEveryNeutralSessionMethodByName() {
+        assertCovered(Arrays.asList(ReactiveSftpClientSession.class.getDeclaredMethods()),
+            MutinySftpSession.class);
+    }
+
+    private static void assertCovered(List<Method> neutral, Class<?> wrapper) {
+        Set<String> wrapped = Arrays.stream(wrapper.getDeclaredMethods())
             .map(Method::getName)
             .collect(Collectors.toSet());
 
-        List<String> missing = Arrays.stream(ReactiveSftpClient.class.getMethods())
-            .filter(m -> !m.isSynthetic())
+        List<String> missing = neutral.stream()
+            .filter(m -> !m.isSynthetic() && Modifier.isPublic(m.getModifiers()))
             .map(Method::getName)
             .distinct()
             .filter(name -> !wrapped.contains(name))
-            // PENDING: session support lands in this wrapper with its own operations type. Remove
-            // this line when it does; until then the neutral client is reachable via unwrap().
-            .filter(name -> !Set.of("withSession", "openSession", "sessionContext").contains(name))
             .sorted()
             .toList();
 
         assertThat(missing)
-            .describedAs("operations on ReactiveSftpClient with no Mutiny delegation; "
-                + "each is a one-line Uni.createFrom().completionStage(...) away")
+            .describedAs("neutral methods with no Mutiny counterpart on " + wrapper.getSimpleName()
+                + "; each is a one-line Uni.createFrom().completionStage(...) away")
             .isEmpty();
     }
 }
