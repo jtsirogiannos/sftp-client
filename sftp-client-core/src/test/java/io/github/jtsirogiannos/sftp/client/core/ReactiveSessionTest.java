@@ -206,6 +206,26 @@ public class ReactiveSessionTest {
         }
     }
 
+    /**
+     * A composite's later steps run in continuations, off the thread the binding was made on; routed
+     * step by step they would borrow, and on a pool of one wait for the session itself.
+     */
+    @Test
+    public void aCompositeCalledOnTheClientRunsEntirelyInTheCurrentSession() throws Exception {
+        try (BoundedSftpSessionPool<SftpSession> pool = provider.pool(1);
+             DefaultReactiveSftpClient client = client(pool)) {
+
+            // Each composite is called in its work's synchronous part, where a thread-local binding
+            // is visible; its own later steps are what the routing has to carry.
+            await(client.withSession(ops -> client.mkdirs("/deep/er/still")));
+            await(client.withSession(ops ->
+                    client.uploadAtomically("/deep/er/still/f.txt", ReactiveFlows.text("x"))));
+            int removed = await(client.withSession(ops -> client.deleteRecursively("/deep")));
+
+            assertThat(removed).isEqualTo(4);
+        }
+    }
+
     @Test
     public void aNestedUnitOfWorkJoinsTheOuterOne() throws Exception {
         try (BoundedSftpSessionPool<SftpSession> pool = provider.pool(1);

@@ -249,6 +249,30 @@ public abstract class ContextualReactiveSftpClient implements ReactiveSftpClient
         return target().statvfs(path);
     }
 
+    // --- composites, routed once ---
+    //
+    // The convenience methods are composed of several primitives, and on this facade every step
+    // after the first runs in a continuation — on whichever thread completed the step before, where a
+    // binding made on the caller's thread is not visible. Routed primitive by primitive, the first
+    // step of mkdirs would join the current session and the rest would borrow a connection each, and
+    // on a pool the session already fills, wait for it. So each composite resolves its target once,
+    // when it is called, and runs every step there.
+
+    @Override
+    public CompletionStage<Void> mkdirs(String path) {
+        return target().mkdirs(path);
+    }
+
+    @Override
+    public CompletionStage<Integer> deleteRecursively(String path) {
+        return target().deleteRecursively(path);
+    }
+
+    @Override
+    public CompletionStage<Void> uploadAtomically(String remotePath, Flow.Publisher<ByteBuffer> data) {
+        return target().uploadAtomically(remotePath, data);
+    }
+
     /** Never routed; see the class comment. */
     @Override
     public Flow.Publisher<ByteBuffer> download(String remotePath, long fromOffset) {
