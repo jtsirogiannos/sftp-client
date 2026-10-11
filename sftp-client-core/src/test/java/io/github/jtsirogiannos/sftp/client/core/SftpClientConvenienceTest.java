@@ -157,6 +157,50 @@ public class SftpClientConvenienceTest {
                 .hasMessageContaining("refusing");
     }
 
+    /** The refusal is on what the path means, not how it is spelled. */
+    @Test
+    public void deleteRecursivelyRefusesEverySpellingOfTheRoot() {
+        client.putFile("/upload/keep.txt", "x");
+        for (String root : List.of("/.", "//", "/upload/..", "/../", "/upload/./../.")) {
+            assertThatThrownBy(() -> client.deleteRecursively(root))
+                    .describedAs(root)
+                    .isInstanceOf(SftpException.class)
+                    .hasMessageContaining("refusing to delete the remote root");
+        }
+        assertThat(client.exists("/upload/keep.txt")).isTrue();
+    }
+
+    @Test
+    public void deleteRecursivelyRefusesTheLoginDirectoryAndItsAncestors() {
+        for (String home : List.of(".", "./", "a/..", "..", "a/../..")) {
+            assertThatThrownBy(() -> client.deleteRecursively(home))
+                    .describedAs(home)
+                    .isInstanceOf(SftpException.class)
+                    .hasMessageContaining("login directory");
+        }
+        assertThat(client.removed).isEmpty();
+    }
+
+    @Test
+    public void mkdirsKeepsARelativePathRelative() {
+        client.mkdirs("reports/2026/10");
+
+        assertThat(client.dirs).contains("reports", "reports/2026", "reports/2026/10");
+        assertThat(client.dirs).doesNotContain("/reports");
+    }
+
+    @Test
+    public void uploadAtomicallyKeepsTheScratchFileBesideARelativeDestination() {
+        client.uploadAtomically("orders.csv", new ByteArrayInputStream("x".getBytes(StandardCharsets.UTF_8)));
+
+        assertThat(client.uploadedTo).hasSize(1);
+        assertThat(client.uploadedTo.get(0))
+                .describedAs("same directory as the destination: the login directory, not /")
+                .startsWith(".orders.csv.")
+                .endsWith(".part");
+        assertThat(client.readFile("orders.csv")).isEqualTo("x");
+    }
+
     // --- local file transfers and filtering ---
 
     @Test
@@ -200,6 +244,8 @@ public class SftpClientConvenienceTest {
         final Set<String> dirs = new LinkedHashSet<>();
         final Set<String> symlinks = new LinkedHashSet<>();
         final Map<String, String> linkTargets = new LinkedHashMap<>();
+        final List<String> uploadedTo = new ArrayList<>();
+        final List<String> removed = new ArrayList<>();
         int mkdirCalls;
         String failMkdirOn;
         String createRaceOn;
@@ -337,6 +383,7 @@ public class SftpClientConvenienceTest {
                 throw new SftpException("no such file: " + path, null,
                         SftpException.SSH_FX_NO_SUCH_FILE);
             }
+            removed.add(path);
             files.remove(path);
             dirs.remove(path);
             symlinks.remove(path);
@@ -372,6 +419,7 @@ public class SftpClientConvenienceTest {
 
         @Override
         public void upload(String remotePath, InputStream data) {
+            uploadedTo.add(remotePath);
             try {
                 files.put(remotePath, data.readAllBytes());
             } catch (java.io.IOException e) {

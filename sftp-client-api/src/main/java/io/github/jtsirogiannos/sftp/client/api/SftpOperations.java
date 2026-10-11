@@ -211,12 +211,17 @@ public interface SftpOperations {
             return;
         }
 
-        StringBuilder progress = new StringBuilder();
+        // A relative path stays relative: it names something under the login directory, and
+        // prefixing a slash would quietly create the chain under the server root instead.
+        StringBuilder progress = new StringBuilder(normalised.startsWith("/") ? "/" : "");
         for (String segment : normalised.split("/")) {
             if (segment.isEmpty()) {
                 continue;
             }
-            progress.append('/').append(segment);
+            if (progress.length() > 0 && progress.charAt(progress.length() - 1) != '/') {
+                progress.append('/');
+            }
+            progress.append(segment);
             String current = progress.toString();
             if (exists(current)) {
                 continue;
@@ -249,9 +254,11 @@ public interface SftpOperations {
      * @return the number of entries removed, directories included
      */
     default int deleteRecursively(String path) {
-        if ("/".equals(path)) {
-            // Refusing outright: nothing good follows from a typo'd variable expanding to "/".
-            throw new SftpException("refusing to delete the remote root directory");
+        // Refusing outright: nothing good follows from a typo'd variable expanding to "/" — or to
+        // "/.", or "a/..". The check is on the normalised path for exactly that reason.
+        SftpException refusal = SftpPaths.refusalToDeleteRecursively(path);
+        if (refusal != null) {
+            throw refusal;
         }
         if (!exists(path)) {
             return 0;

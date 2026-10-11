@@ -29,13 +29,18 @@ final class AtomicPublish {
      */
     static String temporaryPathFor(String remotePath) {
         int slash = remotePath.lastIndexOf('/');
-        String directory = slash <= 0 ? "/" : remotePath.substring(0, slash);
         String name = remotePath.substring(slash + 1);
         if (name.isEmpty()) {
             throw new SftpException("cannot upload to a directory path: " + remotePath);
         }
-        return ("/".equals(directory) ? "" : directory)
-            + "/." + name + "." + UUID.randomUUID() + ".part";
+        String scratch = "." + name + "." + UUID.randomUUID() + ".part";
+        if (slash < 0) {
+            // A bare relative name lives in the login directory, so its scratch file must too. Treating
+            // it as a child of "/" put the scratch file on another filesystem, or somewhere the account
+            // cannot write, and turned the rename into a move.
+            return scratch;
+        }
+        return remotePath.substring(0, slash + 1) + scratch;
     }
 
     /**

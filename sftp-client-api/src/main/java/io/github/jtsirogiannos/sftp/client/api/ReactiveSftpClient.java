@@ -214,12 +214,16 @@ public interface ReactiveSftpClient extends AutoCloseable {
         // stages are already complete the composition runs inline, and a recursive chain would grow
         // the stack once per path segment.
         CompletionStage<Void> chain = CompletableFuture.completedFuture(null);
-        StringBuilder progress = new StringBuilder();
+        // A relative path stays relative, as in the blocking form.
+        StringBuilder progress = new StringBuilder(normalised.startsWith("/") ? "/" : "");
         for (String segment : normalised.split("/")) {
             if (segment.isEmpty()) {
                 continue;
             }
-            progress.append('/').append(segment);
+            if (progress.length() > 0 && progress.charAt(progress.length() - 1) != '/') {
+                progress.append('/');
+            }
+            progress.append(segment);
             String current = progress.toString();
             chain = chain.thenCompose(ignored -> createIfAbsent(current));
         }
@@ -248,10 +252,10 @@ public interface ReactiveSftpClient extends AutoCloseable {
      * it was given and delete somebody else's files.
      */
     default CompletionStage<Integer> deleteRecursively(String path) {
-        if ("/".equals(path)) {
-            // Refusing outright: nothing good follows from a typo'd variable expanding to "/".
-            return CompletableFuture.failedFuture(
-                new SftpException("refusing to delete the remote root directory"));
+        // The same refusals as the blocking form, failing the stage rather than throwing.
+        SftpException refusal = SftpPaths.refusalToDeleteRecursively(path);
+        if (refusal != null) {
+            return CompletableFuture.failedFuture(refusal);
         }
         return exists(path).thenCompose(present -> {
             if (!present) {
