@@ -8,7 +8,7 @@ import java.util.concurrent.CompletionException;
 /**
  * The parts of publish-by-rename that the blocking and reactive facades must agree on.
  *
- * <p>Both {@link SftpOperations#uploadAtomically} and {@link ReactiveSftpClient#uploadAtomically}
+ * <p>Both {@link SftpOperations#uploadAtomically} and {@link ReactiveSftpOperations#uploadAtomically}
  * are default methods composed from their own primitives, which is what keeps providers out of it.
  * The risk in having two implementations is that they drift — a different scratch-file suffix, or a
  * refusal message that explains the v3 limitation on one path and not the other. The rules live here
