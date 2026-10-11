@@ -65,6 +65,22 @@ public interface SftpClient extends SftpOperations, AutoCloseable {
     void withSessionWithoutResult(Consumer<SftpOperations> work);
 
     /**
+     * Opens a session the caller manages: one connection, held until the returned session is closed.
+     *
+     * <p>The explicit form of {@link #withSession}, for when a lambda is the wrong shape — the work
+     * throws checked exceptions, or spans several methods, or the session is handed to something
+     * else. Use it with {@code try}-with-resources; an unclosed session holds a pooled connection
+     * until the process ends.
+     *
+     * <p>Every call opens a <em>new</em> session on its own connection, so this is also how to get a
+     * second connection on purpose — two transfers that must overlap, say.
+     *
+     * @throws SftpException if no connection can be had — the pool is exhausted past its acquire
+     *                       timeout, or a new one cannot be opened
+     */
+    SftpClientSession openSession();
+
+    /**
      * Closes the pool and every idle session in it. Idempotent, and never throws — note the narrowed
      * signature, so {@code try}-with-resources needs no catch.
      */

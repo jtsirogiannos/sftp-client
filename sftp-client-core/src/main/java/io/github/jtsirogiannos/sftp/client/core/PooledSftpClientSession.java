@@ -3,6 +3,7 @@ package io.github.jtsirogiannos.sftp.client.core;
 import io.github.jtsirogiannos.sftp.client.api.AttributeUpdate;
 import io.github.jtsirogiannos.sftp.client.api.FilesystemStats;
 import io.github.jtsirogiannos.sftp.client.api.RemoteFile;
+import io.github.jtsirogiannos.sftp.client.api.SftpClientSession;
 import io.github.jtsirogiannos.sftp.client.api.SftpException;
 import io.github.jtsirogiannos.sftp.client.api.SftpOperations;
 import io.github.jtsirogiannos.sftp.client.pool.SftpSessionPool;
@@ -21,8 +22,8 @@ import java.util.function.Predicate;
 /**
  * The operations, pinned to one borrowed session until {@link #close()} hands it back.
  *
- * <p>What a unit of work runs over, so a sequence of calls travels over a single connection instead
- * of borrowing and returning one per operation. Every default method on {@link SftpOperations} —
+ * <p>What {@code openSession()} returns and what a {@code withSession} block runs over, so a sequence
+ * of calls travels over a single connection instead of borrowing and returning one per operation. Every default method on {@link SftpOperations} —
  * {@code mkdirs}, {@code deleteRecursively}, {@code findFirst} — comes along for free, because they
  * are composed from the primitives below.
  *
@@ -47,7 +48,7 @@ import java.util.function.Predicate;
  * <p>Single-owner and not thread-safe, like the session behind it. Only the {@code released} flag is
  * read across threads, so that a close from elsewhere is seen by anything still holding this.
  */
-final class PooledSftpClientSession implements SftpOperations, AutoCloseable {
+final class PooledSftpClientSession implements SftpClientSession {
 
     private static final int COPY_BUFFER = 64 * 1024;
 
@@ -63,74 +64,74 @@ final class PooledSftpClientSession implements SftpOperations, AutoCloseable {
 
     @Override
     public List<RemoteFile> list(String path) {
-        return session.list(path);
+        return session().list(path);
     }
 
     @Override
     public void visit(String path, Predicate<RemoteFile> visitor) {
         // Straight through. Stopping early is fine: the SPI obliges the provider to close the
         // directory handle and leave the session usable, and the conformance suite holds it to that.
-        session.list(path, visitor);
+        session().list(path, visitor);
     }
 
     @Override
     public RemoteFile stat(String path) {
-        return session.stat(path);
+        return session().stat(path);
     }
 
     @Override
     public RemoteFile lstat(String path) {
-        return session.lstat(path);
+        return session().lstat(path);
     }
 
     @Override
     public boolean exists(String path) {
-        return session.exists(path);
+        return session().exists(path);
     }
 
     @Override
     public String realpath(String path) {
-        return session.realpath(path);
+        return session().realpath(path);
     }
 
     @Override
     public void symlink(String linkPath, String targetPath) {
-        session.symlink(linkPath, targetPath);
+        session().symlink(linkPath, targetPath);
     }
 
     @Override
     public String readlink(String linkPath) {
-        return session.readlink(linkPath);
+        return session().readlink(linkPath);
     }
 
     @Override
     public void hardlink(String linkPath, String targetPath) {
-        session.hardlink(linkPath, targetPath);
+        session().hardlink(linkPath, targetPath);
     }
 
     @Override
     public void setAttributes(String path, AttributeUpdate update) {
-        session.setAttributes(path, update);
+        session().setAttributes(path, update);
     }
 
     @Override
     public FilesystemStats statvfs(String path) {
-        return session.statvfs(path);
+        return session().statvfs(path);
     }
 
     @Override
     public void mkdir(String path) {
-        session.mkdir(path);
+        session().mkdir(path);
     }
 
     @Override
     public void rename(String from, String to) {
-        session.rename(from, to);
+        session().rename(from, to);
     }
 
     @Override
     public void remove(String path) {
-        session.remove(path);
+        session().remove(path);
     }
 
     /**
@@ -142,7 +143,7 @@ final class PooledSftpClientSession implements SftpOperations, AutoCloseable {
      */
     @Override
     public InputStream download(String remotePath) {
-        InputStream in = session.openRead(remotePath);
+        InputStream in = session().openRead(remotePath);
         openStreams.incrementAndGet();
         return new TrackedInputStream(in);
     }
@@ -154,7 +155,7 @@ final class PooledSftpClientSession implements SftpOperations, AutoCloseable {
 
     @Override
     public long download(String remotePath, OutputStream target, long fromOffset) {
-        try (InputStream in = session.openRead(remotePath, fromOffset)) {
+        try (InputStream in = session().openRead(remotePath, fromOffset)) {
             byte[] buffer = new byte[COPY_BUFFER];
             long total = 0;
             int read;
@@ -175,7 +176,7 @@ final class PooledSftpClientSession implements SftpOperations, AutoCloseable {
 
     @Override
     public void upload(String remotePath, InputStream data, SftpSession.WriteMode mode) {
-        try (OutputStream out = session.openWrite(remotePath, mode)) {
+        try (OutputStream out = session().openWrite(remotePath, mode)) {
             data.transferTo(out);
         } catch (IOException e) {
             throw new SftpException("upload to '" + remotePath + "' failed", e);
@@ -201,8 +202,31 @@ final class PooledSftpClientSession implements SftpOperations, AutoCloseable {
         }
     }
 
-    boolean isOpen() {
+    @Override
+    public boolean isOpen() {
         return !released.get();
+    }
+
+    /**
+     * The session, if this handle may still use it.
+     *
+     * <p>The open-stream rule is enforced rather than documented because breaking it does not fail —
+     * it corrupts. JSch keeps one request queue per channel and up to sixteen READs in flight behind
+     * an open download; a {@code stat} issued meanwhile reads a DATA packet as its reply, and a second
+     * {@code get} resets the queue under the first. {@code upload(dst, download(src))} on one session
+     * did exactly that.
+     */
+    private SftpSession session() {
+        if (released.get()) {
+            throw new IllegalStateException("this SFTP session is closed");
+        }
+        if (openStreams.get() > 0) {
+            throw new IllegalStateException("a download opened on this session is still being read. "
+                    + "Close that stream first, or open a second session for work that has to overlap "
+                    + "it: several SFTP clients, JSch among them, cannot interleave a read with other "
+                    + "requests on one channel.");
+        }
+        return session;
     }
 
     /** Counts itself out on close, once, however many times close is called. */

@@ -240,6 +240,11 @@ public class DefaultSftpClient implements SftpClient {
     }
 
     @Override
+    public io.github.jtsirogiannos.sftp.client.api.SftpClientSession openSession() {
+        return new PooledSftpClientSession(pool.borrow(), pool);
+    }
+
+    @Override
     public void close() {
         pool.close();
     }

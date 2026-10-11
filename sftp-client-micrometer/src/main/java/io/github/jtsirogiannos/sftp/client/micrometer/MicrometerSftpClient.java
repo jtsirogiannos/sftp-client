@@ -1,8 +1,10 @@
 package io.github.jtsirogiannos.sftp.client.micrometer;
 
 import io.github.jtsirogiannos.sftp.client.api.SftpClient;
+import io.github.jtsirogiannos.sftp.client.api.SftpClientSession;
 import io.github.jtsirogiannos.sftp.client.api.SftpConnectionConfig;
 import io.github.jtsirogiannos.sftp.client.api.SftpOperations;
+import io.github.jtsirogiannos.sftp.client.core.ForwardingSftpClientSession;
 import io.github.jtsirogiannos.sftp.client.core.ForwardingSftpOperations;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
@@ -39,7 +41,7 @@ import java.util.function.Function;
  * session-bound {@link SftpOperations} that would otherwise bypass this decorator entirely and go
  * unreported — the exact case where per-operation timing matters most, since that is where callers
  * put their multi-step work. The operations handed to the block are wrapped with the same
- * instrumentation.
+ * instrumentation, and so is a session from {@code openSession()}.
  */
 public final class MicrometerSftpClient extends ForwardingSftpOperations implements SftpClient {
 
@@ -94,6 +96,23 @@ public final class MicrometerSftpClient extends ForwardingSftpOperations impleme
     public void withSessionWithoutResult(Consumer<SftpOperations> work) {
         client.withSessionWithoutResult(operations ->
             work.accept(new MeteredSftpOperations(operations, registry, tags)));
+    }
+
+    @Override
+    public SftpClientSession openSession() {
+        SftpClientSession session = client.openSession();
+        SftpOperations metered = new MeteredSftpOperations(session, registry, tags);
+        return new ForwardingSftpClientSession() {
+            @Override
+            protected SftpOperations delegate() {
+                return metered;
+            }
+
+            @Override
+            protected SftpClientSession session() {
+                return session;
+            }
+        };
     }
 
     @Override

@@ -103,6 +103,18 @@ class MicrometerSftpClientTest {
         assertThat(counterTotal("upload")).isEqualTo(16);
     }
 
+    /** The same blind spot, explicit form: a session the caller opens is metered too. */
+    @Test
+    void measuresOperationsOnAnOpenSession() {
+        try (var session = client.openSession()) {
+            session.mkdir("/upload/opened");
+            session.upload("/upload/opened/f.bin", new ByteArrayInputStream(new byte[12]));
+        }
+
+        assertThat(timerCount("mkdir", "success")).isEqualTo(1);
+        assertThat(counterTotal("upload")).isEqualTo(12);
+    }
+
     @Test
     void bindsPoolGauges() {
         SftpConnectionConfig config = config();

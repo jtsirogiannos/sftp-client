@@ -128,6 +128,55 @@ public final class OpenTelemetrySftpClient extends ForwardingSftpOperations impl
         });
     }
 
+    /**
+     * One {@code sftp.session} span from open to close, with the session's operations as its
+     * children — the same shape as a {@code withSession} block, with one difference.
+     *
+     * <p>The span is <em>not</em> made current. A session opened here can be closed anywhere, by
+     * anyone, in any order relative to other scopes; a {@code Scope} closed out of order corrupts
+     * the thread's context for everything after it. So the session's operations name the span as
+     * their parent explicitly, and the caller's own context is left alone.
+     */
+    @Override
+    public io.github.jtsirogiannos.sftp.client.api.SftpClientSession openSession() {
+        Span span = sessionSpan();
+        io.github.jtsirogiannos.sftp.client.api.SftpClientSession session;
+        try {
+            session = client.openSession();
+        } catch (RuntimeException e) {
+            span.setStatus(StatusCode.ERROR);
+            span.setAttribute(SftpAttributes.ERROR_TYPE, e.getClass().getCanonicalName());
+            span.recordException(e);
+            span.end();
+            throw e;
+        }
+        SftpOperations traced = new TracedSftpOperations(session, tracer, endpoint, pathRedactor,
+            io.opentelemetry.context.Context.current().with(span));
+        return new io.github.jtsirogiannos.sftp.client.core.ForwardingSftpClientSession() {
+            @Override
+            protected SftpOperations delegate() {
+                return traced;
+            }
+
+            @Override
+            protected io.github.jtsirogiannos.sftp.client.api.SftpClientSession session() {
+                return session;
+            }
+
+            @Override
+            public void close() {
+                if (!session.isOpen()) {
+                    return;
+                }
+                try {
+                    super.close();
+                } finally {
+                    span.end();
+                }
+            }
+        };
+    }
+
     /** INTERNAL, not CLIENT: the block is work over a connection, not a single remote call. */
     private Span sessionSpan() {
         return tracer.spanBuilder("sftp.session")

@@ -117,6 +117,39 @@ class OpenTelemetrySftpClientTest {
         assertThat(session.getKind().name()).isEqualTo("INTERNAL");
     }
 
+    /**
+     * An open session gets the same shape — its operations beneath one {@code sftp.session} span —
+     * without ever making that span current, since the session may close in any order relative to
+     * the caller's own scopes.
+     */
+    @Test
+    void nestsAnOpenSessionsOperationsUnderItsSpanWithoutMakingItCurrent() {
+        try (var session = client.openSession()) {
+            assertThat(io.opentelemetry.api.trace.Span.current().getSpanContext().isValid())
+                .describedAs("the session span must not leak into the caller's context")
+                .isFalse();
+            session.mkdir("/upload/opened");
+            session.exists("/upload/opened");
+        }
+
+        SpanData sessionSpan = only("sftp.session");
+        List<SpanData> children = spans.getFinishedSpanItems().stream()
+            .filter(s -> s.getParentSpanId().equals(sessionSpan.getSpanId())).toList();
+        assertThat(children).extracting(SpanData::getName)
+            .containsExactlyInAnyOrder("sftp.mkdir", "sftp.exists");
+        assertThat(sessionSpan.hasEnded()).isTrue();
+    }
+
+    @Test
+    void endsTheSessionSpanOnceHoweverOftenTheSessionIsClosed() {
+        var session = client.openSession();
+        session.close();
+        session.close();
+
+        assertThat(spans.getFinishedSpanItems()).extracting(SpanData::getName)
+            .containsExactly("sftp.session");
+    }
+
     /** The redactor must be what reaches the exporter, or it is decorative. */
     @Test
     void appliesThePathRedactorBeforeExport() {

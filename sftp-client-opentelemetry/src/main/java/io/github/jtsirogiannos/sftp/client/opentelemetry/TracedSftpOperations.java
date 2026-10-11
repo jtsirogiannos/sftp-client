@@ -31,12 +31,27 @@ final class TracedSftpOperations extends ForwardingSftpOperations {
     private final Endpoint endpoint;
     private final java.util.function.UnaryOperator<String> pathRedactor;
 
+    /** Where operation spans attach; null to use whatever context is current when each starts. */
+    private final io.opentelemetry.context.Context parent;
+
     TracedSftpOperations(SftpOperations delegate, Tracer tracer, Endpoint endpoint,
             java.util.function.UnaryOperator<String> pathRedactor) {
+        this(delegate, tracer, endpoint, pathRedactor, null);
+    }
+
+    /**
+     * With an explicit parent, for the operations of a session from {@code openSession()}: that
+     * session's span is never made current — it can outlive any scope it was opened in, and a
+     * {@code Scope} closed out of order corrupts the context — so its children have to name it.
+     */
+    TracedSftpOperations(SftpOperations delegate, Tracer tracer, Endpoint endpoint,
+            java.util.function.UnaryOperator<String> pathRedactor,
+            io.opentelemetry.context.Context parent) {
         this.delegate = delegate;
         this.tracer = tracer;
         this.endpoint = endpoint;
         this.pathRedactor = pathRedactor;
+        this.parent = parent;
     }
 
     @Override
@@ -198,6 +213,9 @@ final class TracedSftpOperations extends ForwardingSftpOperations {
             .setAttribute(SftpAttributes.FILE_PATH, pathRedactor.apply(path));
         endpoint.protocolVersion()
             .ifPresent(v -> builder.setAttribute(SftpAttributes.NETWORK_PROTOCOL_VERSION, v));
+        if (parent != null) {
+            builder.setParent(parent);
+        }
         return builder.startSpan();
     }
 
