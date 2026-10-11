@@ -1,16 +1,13 @@
 package io.github.jtsirogiannos.sftp.client.kotlin
 
-import io.github.jtsirogiannos.sftp.client.api.AttributeUpdate
-import io.github.jtsirogiannos.sftp.client.api.FilesystemStats
+import io.github.jtsirogiannos.sftp.client.api.MultiTenantReactiveSftpClient
 import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClient
-import io.github.jtsirogiannos.sftp.client.api.RemoteFile
-import io.github.jtsirogiannos.sftp.client.spi.SftpCapabilities
-import io.github.jtsirogiannos.sftp.client.spi.SftpSession
-import kotlinx.coroutines.flow.Flow
+import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpOperations
+import io.github.jtsirogiannos.sftp.client.context.SftpSessionContext
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.future.await
-import kotlinx.coroutines.jdk9.asFlow
-import kotlinx.coroutines.jdk9.asPublisher
-import java.nio.ByteBuffer
+import kotlinx.coroutines.future.future
 
 /**
  * Coroutine view of the neutral [ReactiveSftpClient].
@@ -23,6 +20,17 @@ import java.nio.ByteBuffer
  * A wrapper rather than extension functions, for two reasons. It matches what the Quarkus and Spring
  * modules do, and an extension named `list` would be shadowed by the member `list` it is trying to
  * improve on — Kotlin resolves members before extensions.
+ *
+ * ### Units of work
+ *
+ * [withSession] runs a block over one connection, and the session it opens is current for the
+ * block's whole extent — carried in the coroutine context, so it survives suspensions and dispatcher
+ * hops that a thread-local would not. Calls on this client from anywhere inside the block join it.
+ *
+ * ### Tenants
+ *
+ * Over a [MultiTenantReactiveSftpClient], calls act for the tenant named by [withTenant] in the
+ * coroutine context, falling back to the client's own resolver when none is.
  *
  * ### Cancellation
  *
@@ -46,100 +54,61 @@ class SuspendingSftpClient(
      * what is missing instead of holding a second reference themselves.
      */
     val underlying: ReactiveSftpClient,
-) : AutoCloseable {
+) : SuspendingSftpOperations(underlying, underlying.sessionContext()), AutoCloseable {
 
-    private val delegate: ReactiveSftpClient get() = underlying
+    /** The current tenant's client, when the coroutine names one and there are tenants to name. */
+    override suspend fun target(): ReactiveSftpOperations = client()
 
-    suspend fun list(path: String): List<RemoteFile> = delegate.list(path).await()
-
-    suspend fun stat(path: String): RemoteFile = delegate.stat(path).await()
-
-    suspend fun exists(path: String): Boolean = delegate.exists(path).await()
-
-    suspend fun mkdir(path: String) {
-        delegate.mkdir(path).await()
+    private suspend fun client(): ReactiveSftpClient {
+        val tenant = currentCoroutineContext()[CurrentSftpTenant]?.tenantId
+        return if (tenant != null && underlying is MultiTenantReactiveSftpClient) {
+            underlying.forTenant(tenant)
+        } else {
+            underlying
+        }
     }
-
-    suspend fun rename(from: String, to: String) {
-        delegate.rename(from, to).await()
-    }
-
-    suspend fun remove(path: String) {
-        delegate.remove(path).await()
-    }
-
-    /** Attributes without following symlinks — what a tree walk must use. */
-    suspend fun lstat(path: String): RemoteFile = delegate.lstat(path).await()
-
-    suspend fun realpath(path: String): String = delegate.realpath(path).await()
-
-    suspend fun symlink(linkPath: String, targetPath: String) {
-        delegate.symlink(linkPath, targetPath).await()
-    }
-
-    suspend fun readlink(linkPath: String): String = delegate.readlink(linkPath).await()
-
-    suspend fun hardlink(linkPath: String, targetPath: String) {
-        delegate.hardlink(linkPath, targetPath).await()
-    }
-
-    suspend fun setAttributes(path: String, update: AttributeUpdate) {
-        delegate.setAttributes(path, update).await()
-    }
-
-    suspend fun statvfs(path: String): FilesystemStats = delegate.statvfs(path).await()
-
-    /** `mkdir -p`. An existing chain is not an error. */
-    suspend fun mkdirs(path: String) {
-        delegate.mkdirs(path).await()
-    }
-
-    /** Deletes a tree, removing symlinks as links, never following them. */
-    suspend fun deleteRecursively(path: String): Int = delegate.deleteRecursively(path).await()
-
-    suspend fun chmod(path: String, mode: Int) {
-        delegate.chmod(path, mode).await()
-    }
-
-    /** Directory entries matching [filter], filtered client-side. */
-    suspend fun list(path: String, filter: (RemoteFile) -> Boolean): List<RemoteFile> =
-        delegate.list(path) { filter(it) }.await()
-
-    suspend fun findFirst(path: String, match: (RemoteFile) -> Boolean): RemoteFile? =
-        delegate.findFirst(path) { match(it) }.await().orElse(null)
 
     /**
-     * Streams a remote file as backpressured chunks.
+     * Runs [block] over one connection, with that session current for the block's whole extent.
      *
-     * Cold: nothing is transferred until the flow is collected, and abandoning the collection
-     * cancels the transfer and discards the session.
+     * ```kotlin
+     * client.withSession {
+     *     mkdirs("/outbound/2026/10")
+     *     upload("/outbound/2026/10/report.csv", data)
+     *     archiver.archive()   // calls on `client` inside join this session
+     * }
+     * ```
+     *
+     * A nested `withSession` joins rather than borrowing another connection. Exceptions from the
+     * block propagate unchanged; the connection goes back to the pool if it is still sound.
      */
-    fun download(remotePath: String): Flow<ByteBuffer> = delegate.download(remotePath).asFlow()
-
-    /** As [download], starting at [fromOffset] — the resume primitive. */
-    fun download(remotePath: String, fromOffset: Long): Flow<ByteBuffer> =
-        delegate.download(remotePath, fromOffset).asFlow()
-
-    /** Consumes [data] with backpressure and writes it, returning when the final flush lands. */
-    suspend fun upload(remotePath: String, data: Flow<ByteBuffer>) {
-        delegate.upload(remotePath, data.asPublisher()).await()
-    }
-
-    /** As [upload], with explicit write semantics — APPEND, or CREATE_NEW where supported. */
-    suspend fun upload(remotePath: String, data: Flow<ByteBuffer>, mode: SftpSession.WriteMode) {
-        delegate.upload(remotePath, data.asPublisher(), mode).await()
+    suspend fun <R> withSession(block: suspend SuspendingSftpOperations.() -> R): R {
+        val client = client()
+        val outer = currentBindings()
+        return coroutineScope {
+            val scope = this
+            context.callWith(outer) {
+                client.withSession<R> { operations ->
+                    // Captured inside the neutral withSession, where its session has just been made
+                    // current on this thread — then carried into the block's coroutine context.
+                    val inner = context.capture()
+                    scope.future(SftpSessionBindings(inner)) {
+                        SuspendingSftpOperations(operations, context).block()
+                    }
+                }
+            }.await()
+        }
     }
 
     /**
-     * Publishes by rename: a reader watching the destination never sees a partial file. Replacing
-     * an existing file needs SFTP v5+ rename semantics and fails on a v3 server rather than
-     * degrading — see the neutral client's documentation.
+     * Opens a session the caller manages; never current, never joined. Close it, or use
+     * [SuspendingSftpSession.use].
      */
-    suspend fun uploadAtomically(remotePath: String, data: Flow<ByteBuffer>) {
-        delegate.uploadAtomically(remotePath, data.asPublisher()).await()
-    }
+    suspend fun openSession(): SuspendingSftpSession =
+        SuspendingSftpSession(client().openSession().await(), context)
 
-    fun capabilities(): SftpCapabilities = delegate.capabilities()
+    /** Where the underlying client looks for its current session. */
+    fun sessionContext(): SftpSessionContext = context
 
     /**
      * Closes the underlying client and its connection pool.
@@ -147,5 +116,5 @@ class SuspendingSftpClient(
      * This wrapper owns the delegate it was given; the executor is not touched, because it was
      * handed in and is usually shared.
      */
-    override fun close() = delegate.close()
+    override fun close() = underlying.close()
 }
