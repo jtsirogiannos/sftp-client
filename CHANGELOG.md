@@ -39,6 +39,24 @@ Nothing has been published to Maven Central. The API is still free to change.
   `deleteRecursively`, `chmod`, `findFirst` and filtered `list` as default methods composed from
   them. `visit` and the `Path` transfers remain blocking-only.
 
+- Session demarcation, as Hibernate does it. `withSession` makes its session *current*: calls on the
+  client itself join it, a nested block joins instead of borrowing a second connection.
+  `openSession()` returns an explicit, caller-managed `SftpClientSession`. `@WithSftpSession`
+  demarcates declaratively in Spring (blocking, `Mono`, `Flux`) and Quarkus (blocking, `Uni`),
+  validated at startup. The reactive facade gains `withSession`, `openSession` and
+  `ReactiveSftpClientSession`, with operations queued in order and a transfer holding the connection
+  to itself; the Kotlin, Mutiny and Reactor wrappers follow. Where "current" lives is a scoped
+  `SftpSessionContext` SPI keyed by `SessionKey` — a thread local by default, the Vert.x duplicated
+  context in Quarkus, bridged through Reactor's and Kotlin's contexts — shaped so a `ScopedValue` can
+  implement it later. See [ADR 0007](docs/adr/0007-contextual-sessions.md).
+- Multi-tenancy. `MultiTenantSftpClient` and `MultiTenantReactiveSftpClient` act for the tenant a
+  `TenantResolver` names, isolating each by its own connection, by a root directory on a shared one
+  (`RootedSftpClient`), or both, as an `SftpTenantProvider` defines. Configured per endpoint under
+  `sftp.endpoints.<name>.tenancy.*` in both frameworks; Reactor pipelines and coroutines name their
+  tenant in their own context. See [ADR 0008](docs/adr/0008-multi-tenancy.md).
+- `SftpPaths.normalize`, `SftpConnectionConfig.toBuilder()`, `BoundedSftpSessionPool.evictExpired()`,
+  and a `SftpClients.builder` for the session context.
+
 ### Changed
 
 - `SftpConnectionConfig` is a builder-only class rather than a public record, so new fields stop
@@ -60,7 +78,29 @@ Nothing has been published to Maven Central. The API is still free to change.
   `SftpSessionPool` is generic in the session type.
   See [ADR 0002](docs/adr/0002-sibling-session-contracts.md).
 
+- **`withSession` no longer wraps the block's exceptions** in `SftpException`; they arrive unchanged.
+  Its connection is recycled whenever the provider still vouches for it and no stream opened inside
+  is left open, rather than discarded whenever the block threw. Nested blocks join, and calls on the
+  client inside a block use its connection.
+- `ReactiveSftpClient`'s operations moved to a new `ReactiveSftpOperations` it extends; callers are
+  unaffected. `SftpClient` and `ReactiveSftpClient` gain `openSession` and `sessionContext`.
+- A per-call `visit`'s visitor exception reaches the caller unchanged.
+- The SPI requires `isValid()` to return false whenever a channel may be out of step with the server,
+  and a visitor's exception to propagate unchanged; the conformance suite checks both.
+
 ### Fixed
+
+- The JSch provider treated paths as glob patterns: `remove("/d/*")` deleted every file in `/d`, a
+  file named `a*b` could not be opened, and `/a/.\./b` was unescaped into `/a/../b` after any check a
+  caller made. A failure mid-request was reported as a server status and left the session looking
+  valid, and a throwing visitor unwound through a half-read reply. All three fixed.
+- Inside `withSession`, `ops.upload(dst, ops.download(src))` interleaved a read and a write on one
+  JSch channel and corrupted it; a session now refuses other calls while a download opened on it is
+  still being read.
+- `deleteRecursively` refused only the literal `/`; `/.`, `//`, `/upload/..` and `a/..` now are too.
+  `mkdirs("a/b")` built the chain under the server root, and `uploadAtomically` on a bare name put
+  its scratch file in `/`.
+- The in-memory provider listed `/` as a child of itself.
 
 - `ByteArrayPublisher` (in-memory provider) delivered nested `onNext` signals and could overflow the
   stack under a request-one-at-a-time subscriber; its drain loop is now serialised by a

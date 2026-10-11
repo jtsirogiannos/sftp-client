@@ -118,7 +118,69 @@ client.withSessionWithoutResult(work -> {          // withSession(...) if you ne
 ```
 
 The block gets the same `SftpOperations` surface, so nothing changes except how many times the pool
-is asked. A directory sync that took fourteen borrows takes one.
+is asked. A directory sync that took fourteen borrows takes one. It is not a transaction — SFTP has
+no rollback, and work done before a failure stays done.
+
+**The block's session is current**, Hibernate's `getCurrentSession()` for SFTP: calls on the client
+itself join it, so a service that was handed the injected client takes part without being passed
+anything, and a nested block joins rather than borrowing a second connection.
+
+```java
+client.withSessionWithoutResult(work -> {
+    work.mkdirs("/outbound/2026/07");
+    archiver.archive("/outbound/2026/07");   // calls client.rename(...) — the same connection
+});
+```
+
+The block's own exceptions reach you unchanged. When it ends, the connection goes back to the pool
+if the provider still vouches for it and no stream opened inside is left open, and is discarded
+otherwise — so a business exception costs nothing, and a broken connection is never reused.
+
+**The explicit form**, for work a lambda fits badly — checked exceptions, several methods. It is
+never current, so it is also how to get a second connection on purpose:
+
+```java
+try (SftpClientSession session = client.openSession()) {
+    session.mkdirs("/outbound/2026/10");
+    session.upload("/outbound/2026/10/report.csv", Files.newInputStream(report));
+}
+```
+
+While a download opened on a session is still being read, the session refuses every other call:
+JSch, among others, cannot interleave a read with other requests on one channel, and used to corrupt
+it silently. To copy between two remote files, open two sessions.
+
+**Declaratively**, in Spring and Quarkus, as `@Transactional` demarcates a Hibernate session:
+
+```java
+@WithSftpSession("bank-a")
+public void settle(String day) {
+    client.mkdirs("/settlements/" + day);                    // the injected client
+    client.upload("/settlements/" + day + "/batch.csv", batch());
+}
+```
+
+Blocking methods work everywhere; `Mono`/`Flux` with the Spring reactive starter, `Uni` in Quarkus —
+the session then lasts until the returned publisher completes. An unknown endpoint, a missing name
+with several endpoints configured, or a return type that cannot be demarcated fails at startup, not
+on the first request. Spring applies it through a proxy, so a bean calling its own annotated method
+is not demarcated.
+
+**On the reactive facade**, the same model:
+
+```java
+reactive.withSession(ops -> ops.mkdirs("/outbound/2026/10")
+        .thenCompose(done -> ops.upload("/outbound/2026/10/report.csv", chunks)));
+```
+
+A reactive session runs its operations one at a time in the order issued, so fanning out over it is
+safe; a transfer has the connection to itself while it streams. Where the current session is kept
+follows the runtime: on the request's Vert.x context in Quarkus (where Hibernate Reactive keeps its),
+in the Reactor `Context` through `ReactorSftpClient.withSession`, in the coroutine context through
+`SuspendingSftpClient.withSession { }` — each survives the thread hops its pipeline makes. With the
+plain `CompletionStage` client and the default thread-local context, the binding covers only the
+synchronous part of the work; the operations handed to it are always right.
+See [ADR 0007](docs/adr/0007-contextual-sessions.md).
 
 **Sizing the pool, before production sizes it for you.** Every client owns a bounded pool: eight
 sessions, five minutes idle, thirty seconds to acquire. The ninth concurrent operation waits and
@@ -136,6 +198,50 @@ The same three settings exist in both frameworks — `sftp.endpoints.bank-a.pool
 `.pool.max-idle`, `.pool.acquire-timeout` — and reach the same pool. If parked sessions keep dying
 before reuse, `max-idle` is longer than the server's own idle timeout; align it rather than raising
 `max-size`. `sftp-client-micrometer` exposes the gauges and counters that tell the two apart.
+
+**Many tenants through one client**, as Hibernate's multi-tenancy does it. A tenant gets its own
+connection — host, credentials, pool; the server isolates it — or its own root directory on a shared
+connection, or both:
+
+```java
+MultiTenantSftpClient sftp = SftpClients.multiTenant("mina", sharedConfig)
+        .tenants(SftpTenantProvider.rootDirectoryTemplate("/tenants/{tenant}"))
+        .build();
+
+TenantContext.runAs("acme", () -> sftp.upload("/inbound/orders.csv", data));   // /tenants/acme/inbound/orders.csv
+sftp.forTenant("globex").list("/inbound");
+```
+
+```java
+.tenants((tenant, base) -> SftpTenant.connection(base.toBuilder()
+        .username(tenant)
+        .password(vault.secretFor(tenant))
+        .build()))
+```
+
+Calls act for the tenant a `TenantResolver` names when each is made — `TenantContext` by default; in
+an application, a bean reading the request. With no current tenant a call fails rather than falling
+back to anything unconfined, and a session belongs to one tenant. Inside a root directory, `/` is
+that directory, every path is rewritten in and out, and anything that could name a path outside —
+`..`, a backslash, `~` — is refused as permission denied.
+
+**A root directory is a namespace, not a security boundary.** It keeps honest code in its lane, but
+cannot stop the server following a symlink planted inside it, and every tenant shares the account.
+Tenants that must not reach each other need their own credentials and a server-side
+`ChrootDirectory`. `RootedSftpClient.of(client, "/some/dir")` is the same confinement without
+tenants. See [ADR 0008](docs/adr/0008-multi-tenancy.md).
+
+Both frameworks configure it per endpoint, and the endpoint's beans become multi-tenant clients that
+are still injectable as the plain types:
+
+```properties
+sftp.endpoints.partners.tenancy.enabled=true
+sftp.endpoints.partners.tenancy.root-directory=/tenants/{tenant}
+```
+
+An `SftpTenantProvider` bean, or a `TenantResolver` bean, overrides the template or the default
+resolver. Reactor pipelines name their tenant with `contextWrite(SftpReactorContext.tenant("acme"))`,
+coroutines with `withTenant("acme") { }`.
 
 Quarkus — add `quarkus-sftp-client-mina` (or `-jsch`) and inject:
 
@@ -206,6 +312,17 @@ SuspendingSftpClient(SftpClients.reactive("mina", config, worker)).use { client 
     client.download("/inbound/big.csv").collect { chunk -> ... }
     client.deleteRecursively("/outbound/2026/06")
 }
+```
+
+Units of work and tenants travel in the coroutine context, so they survive every suspension and
+dispatcher hop inside the block:
+
+```kotlin
+client.withSession {
+    mkdirs("/outbound/2026/10")
+    upload("/outbound/2026/10/report.csv", chunks)   // and calls on `client` from anything it calls
+}
+withTenant("acme") { client.list("/inbound") }
 ```
 
 That module is sugar, not plumbing — the adapters it wraps are two lines, and calling the neutral
@@ -377,6 +494,15 @@ binary.
   lag an *overload* — checking signatures would mean re-encoding each wrapper's type mapping
   (`CompletionStage`→`Uni`, `ByteBuffer`→`Buffer`) into the test, which is its own thing to get
   wrong.
+- **A reactive unit of work on a plain thread-local context** sees its session only in its
+  synchronous part; calls on the client from later continuations borrow a connection each. The
+  operations handed to the work, the Quarkus Vert.x context, and the Reactor and Kotlin wrappers do
+  not have this limit. The same applies to calls on a *decorated* reactive client inside a unit of
+  work, since a decorator composes `mkdirs` and friends step by step.
+- A borrow made inside a unit of work — an unrouted `download`, a second `openSession`, another
+  tenant — waits for a pool slot like any other, so on a pool the session fills it times out.
+- There is no cap on sessions across all tenants: each tenant with its own connection has its own
+  pool (two sessions by default).
 - Numeric ownership is unavailable on SFTP v4+, which replaced uid/gid with owner *names*.
   `RemoteFile.ownerId()` returns `UNKNOWN_ID` there rather than a fabricated number, so a chown
   written on a v6 server cannot be read back through this API.

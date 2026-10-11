@@ -20,3 +20,5 @@ shipped.
 | [0004](0004-publish-by-rename.md) | `uploadAtomically` publishes by rename, and refuses rather than degrading on SFTP v3 |
 | [0005](0005-test-server-binds-below-ephemeral-range.md) | The embedded test server binds to loopback below the ephemeral port range |
 | [0006](0006-own-namespace-and-one-repository.md) | Publish every module under one namespace from one repository; drop the Quarkiverse namespace |
+| [0007](0007-contextual-sessions.md) | Sessions are current through a scoped context SPI, and recycled on the connection's health |
+| [0008](0008-multi-tenancy.md) | Tenants are isolated by connection, by root directory, or both; a root directory is a namespace |

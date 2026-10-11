@@ -24,7 +24,7 @@ import java.util.function.Function;
  * the Quarkus module makes the same claim with Mutiny. {@code Mono.fromCompletionStage} takes the
  * facade's {@code CompletionStage} directly; the streaming side needs one adapter call, because
  * Reactor consumes {@code org.reactivestreams.Publisher} while the facade speaks
- * {@code java.util.concurrent.Flow.Publisher}. That bridge is {@link FlowAdapters}, and it is the
+ * {@code java.util.concurrent.Flow.Publisher}. That bridge is {@link org.reactivestreams.FlowAdapters}, and it is the
  * whole of the impedance mismatch.
  *
  * <h2>Units of work</h2>

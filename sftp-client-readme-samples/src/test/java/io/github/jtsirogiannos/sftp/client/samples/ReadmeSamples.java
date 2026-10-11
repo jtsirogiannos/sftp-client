@@ -1,9 +1,15 @@
 package io.github.jtsirogiannos.sftp.client.samples;
 
+import io.github.jtsirogiannos.sftp.client.api.MultiTenantSftpClient;
 import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClient;
 import io.github.jtsirogiannos.sftp.client.api.SftpClient;
+import io.github.jtsirogiannos.sftp.client.api.SftpClientSession;
 import io.github.jtsirogiannos.sftp.client.api.SftpConnectionConfig;
+import io.github.jtsirogiannos.sftp.client.api.WithSftpSession;
 import io.github.jtsirogiannos.sftp.client.core.SftpClients;
+import io.github.jtsirogiannos.sftp.client.tenancy.SftpTenant;
+import io.github.jtsirogiannos.sftp.client.tenancy.SftpTenantProvider;
+import io.github.jtsirogiannos.sftp.client.tenancy.TenantContext;
 import io.github.jtsirogiannos.sftp.client.micrometer.MicrometerSftpClient;
 import io.github.jtsirogiannos.sftp.client.micrometer.SftpPoolMetrics;
 import io.github.jtsirogiannos.sftp.client.opentelemetry.OpenTelemetrySftpClient;
@@ -17,6 +23,7 @@ import io.opentelemetry.api.OpenTelemetry;
 
 import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.Flow;
@@ -67,6 +74,73 @@ final class ReadmeSamples {
             work.uploadAtomically("/outbound/2026/07/report.csv", data);
             work.rename("/outbound/2026/07/old.csv", "/archive/old.csv");
         });
+    }
+
+    // The block's session is current: calls on the client itself join it.
+    static void currentSession(SftpClient client, Archiver archiver) throws Exception {
+        client.withSessionWithoutResult(work -> {
+            work.mkdirs("/outbound/2026/07");
+            archiver.archive("/outbound/2026/07");   // calls client.rename(...) — the same connection
+        });
+    }
+
+    // The explicit form.
+    static void openSession(SftpClient client, Path report) throws Exception {
+        try (SftpClientSession session = client.openSession()) {
+            session.mkdirs("/outbound/2026/10");
+            session.upload("/outbound/2026/10/report.csv", Files.newInputStream(report));
+        }
+    }
+
+    // Declaratively.
+    static final class Settlements {
+
+        private SftpClient client;
+
+        @WithSftpSession("bank-a")
+        public void settle(String day) {
+            client.mkdirs("/settlements/" + day);                    // the injected client
+            client.upload("/settlements/" + day + "/batch.csv", batch());
+        }
+
+        private InputStream batch() {
+            return InputStream.nullInputStream();
+        }
+    }
+
+    // On the reactive facade.
+    static void reactiveSession(ReactiveSftpClient reactive, Flow.Publisher<ByteBuffer> chunks)
+            throws Exception {
+        reactive.withSession(ops -> ops.mkdirs("/outbound/2026/10")
+                .thenCompose(done -> ops.upload("/outbound/2026/10/report.csv", chunks)));
+    }
+
+    // Many tenants through one client.
+    static void multiTenant(SftpConnectionConfig sharedConfig, InputStream data, Vault vault)
+            throws Exception {
+        MultiTenantSftpClient sftp = SftpClients.multiTenant("mina", sharedConfig)
+                .tenants(SftpTenantProvider.rootDirectoryTemplate("/tenants/{tenant}"))
+                .build();
+
+        TenantContext.runAs("acme", () -> sftp.upload("/inbound/orders.csv", data));   // /tenants/acme/inbound/orders.csv
+        sftp.forTenant("globex").list("/inbound");
+
+        MultiTenantSftpClient perTenant = SftpClients.multiTenant("mina", sharedConfig)
+                .tenants((tenant, base) -> SftpTenant.connection(base.toBuilder()
+                        .username(tenant)
+                        .password(vault.secretFor(tenant))
+                        .build()))
+                .build();
+    }
+
+    /** Stands in for an application service that was handed the injected client. */
+    interface Archiver {
+        void archive(String directory);
+    }
+
+    /** Stands in for wherever an application keeps per-tenant credentials. */
+    interface Vault {
+        char[] secretFor(String tenant);
     }
 
     // Sizing the pool, before production sizes it for you.

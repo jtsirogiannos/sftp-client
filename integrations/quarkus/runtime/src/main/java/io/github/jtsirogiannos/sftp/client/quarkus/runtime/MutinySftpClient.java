@@ -14,7 +14,8 @@ import io.smallrye.mutiny.Uni;
  * <p>This class is the entire Quarkus reactive integration, and its thinness is the proof that
  * Phase 0 was done right. Mutiny 2 is natively {@code java.util.concurrent.Flow}-based, so no
  * adapter jar is needed — {@code Multi.createFrom().publisher(...)} takes the core's publisher
- * directly, and the only real work is converting {@link ByteBuffer} to Vert.x {@link Buffer}
+ * directly, and the only real work is converting {@link java.nio.ByteBuffer} to Vert.x
+ * {@link io.vertx.core.buffer.Buffer}
  * at the edge.
  *
  * <h2>Units of work</h2>

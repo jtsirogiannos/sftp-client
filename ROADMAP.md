@@ -345,6 +345,26 @@ How the two open questions resolved:
   container keeps the real provider and the real code path; the only cost is Docker, which the build
   detects and degrades to a clear warning without.
 
+### Sessions and tenancy — shipped, with follow-ups
+
+Hibernate-style session demarcation and multi-tenancy are in: see
+[ADR 0007](docs/adr/0007-contextual-sessions.md) and [ADR 0008](docs/adr/0008-multi-tenancy.md).
+What is deliberately left for later, each with the question it has to answer first:
+
+- **A `ScopedValue` session context** once the baseline is Java 25. The SPI is lexical precisely so this
+  is one class: `ScopedValue.where(KEY, bindings).call(work)` is `callWith`. Open question: whether it
+  replaces the thread-local default or sits beside it, given that it cannot be bridged imperatively.
+- **A cap on sessions across all tenants.** Each own-connection tenant has a pool, and MINA sessions
+  each carry client threads. A shared budget needs the pool to account against something outside
+  itself, and an eviction policy for when the budget is spent but another tenant is idle.
+- **Per-tenant pool metrics.** The decorator hook covers operations; the tenant pools themselves are
+  internal, so binding `SftpPoolMetrics` to them needs a listener hook on the builder.
+- **`REQUIRES_NEW`-style propagation.** `openSession()` already gives a second connection; a
+  propagation attribute on `@WithSftpSession` would make it declarative. Wait for a use case.
+- **Decorated reactive clients inside a unit of work** compose their convenience methods step by step,
+  so on a thread-local context later steps miss the session. Fixing it means decorators routing
+  composites once without losing per-step observation.
+
 ### An async network provider
 
 The optional async SPI has shipped — `AsyncSftpSession`, `AsyncSftpProvider`, an `asyncStreaming()`
