@@ -65,6 +65,50 @@ public abstract class ContextualReactiveSftpClient implements ReactiveSftpClient
      */
     protected abstract ReactiveSftpClientSession newSession();
 
+    /**
+     * A session usable at once over one that is still being opened: its operations queue, in order,
+     * until {@code opening} completes, and fail with its failure if it does not.
+     *
+     * <p>For a composed client whose {@link #newSession()} has only another client's
+     * {@code openSession()} to build on — a confined view, say — since {@code withSession} needs a
+     * session to bind before the connection exists.
+     */
+    protected static ReactiveSftpClientSession deferred(
+            CompletionStage<ReactiveSftpClientSession> opening, SftpCapabilities capabilities) {
+        return new QueuedReactiveSession(opening.thenApply(SessionTarget::new), capabilities);
+    }
+
+    /** Another session as a queue's connection: it orders its own calls, and closing is its job. */
+    private static final class SessionTarget extends ForwardingReactiveSftpOperations
+            implements QueuedReactiveSession.Target {
+
+        private final ReactiveSftpClientSession session;
+
+        SessionTarget(ReactiveSftpClientSession session) {
+            this.session = session;
+        }
+
+        @Override
+        protected ReactiveSftpOperations delegate() {
+            return session;
+        }
+
+        /**
+         * The inner session's own answer. Asked only while the outer queue holds no transfer, and
+         * everything goes through that queue, so the inner one is idle too and its answer is about the
+         * connection alone.
+         */
+        @Override
+        public boolean isValid() {
+            return acceptsCalls(session);
+        }
+
+        @Override
+        public CompletionStage<Void> release(boolean clean) {
+            return session.close();
+        }
+    }
+
     @Override
     public final SftpSessionContext sessionContext() {
         return context;

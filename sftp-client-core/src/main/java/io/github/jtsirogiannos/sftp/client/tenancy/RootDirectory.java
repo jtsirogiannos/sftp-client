@@ -123,6 +123,33 @@ final class RootDirectory {
         return inside;
     }
 
+    /**
+     * {@link #fromServer(String, SftpOperations)} for the reactive facade: the canonical root, when it
+     * is needed and not yet known, is resolved without blocking.
+     */
+    java.util.concurrent.CompletionStage<String> fromServerAsync(String serverPath,
+            io.github.jtsirogiannos.sftp.client.api.ReactiveSftpOperations via) {
+        String inside = inView(serverPath);
+        if (inside != null) {
+            return java.util.concurrent.CompletableFuture.completedFuture(inside);
+        }
+        java.util.concurrent.CompletionStage<String> resolved = canonical != null
+                ? java.util.concurrent.CompletableFuture.completedFuture(canonical)
+                : via.realpath(root).thenApply(answer -> {
+                    String normalised = SftpPaths.normalize(answer);
+                    canonical = normalised;
+                    return normalised;
+                });
+        return resolved.thenApply(canonicalRoot -> {
+            String stripped = strip(serverPath, canonicalRoot);
+            if (stripped == null) {
+                throw new SftpException("a path the server reported lies outside this client's root "
+                        + "directory, so it is not shown", null, SftpException.SSH_FX_PERMISSION_DENIED);
+            }
+            return stripped;
+        });
+    }
+
     private String inView(String serverPath) {
         return strip(serverPath, root);
     }

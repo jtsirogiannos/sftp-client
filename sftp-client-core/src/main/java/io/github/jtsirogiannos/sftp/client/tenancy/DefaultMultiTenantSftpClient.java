@@ -7,7 +7,6 @@ import io.github.jtsirogiannos.sftp.client.api.RemoteFile;
 import io.github.jtsirogiannos.sftp.client.api.SftpClient;
 import io.github.jtsirogiannos.sftp.client.api.SftpClientSession;
 import io.github.jtsirogiannos.sftp.client.api.SftpConnectionConfig;
-import io.github.jtsirogiannos.sftp.client.api.SftpException;
 import io.github.jtsirogiannos.sftp.client.api.SftpOperations;
 import io.github.jtsirogiannos.sftp.client.api.TenantResolver;
 import io.github.jtsirogiannos.sftp.client.context.SftpSessionContext;
@@ -18,67 +17,48 @@ import io.github.jtsirogiannos.sftp.client.spi.SftpCapabilities;
 import io.github.jtsirogiannos.sftp.client.spi.SftpProvider;
 import io.github.jtsirogiannos.sftp.client.spi.SftpSession;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
 /**
- * Tenants created on first use, each a confined or own-connection view, all owned here.
- *
- * <p>A tenant's definition is asked for once and its view built from it; both are kept until the
- * tenant is evicted. Built outside any lock — a provider may consult a vault — at the cost that two
- * threads asking for a new tenant at once may each build one; the loser is closed before it has
- * opened anything, since pools connect lazily.
+ * A blocking client per tenant, each a confined or own-connection view, all owned here and kept in a
+ * {@link TenantRegistry}.
  *
  * <p>What callers hold is never the view itself but a {@link TenantHandle}, which looks the tenant
  * up on every call. That is what keeps {@code forTenant}'s result valid across an eviction.
  */
 final class DefaultMultiTenantSftpClient implements MultiTenantSftpClient {
 
-    private static final Logger log = LoggerFactory.getLogger(DefaultMultiTenantSftpClient.class);
-
     private final SftpProvider provider;
-    private final SftpConnectionConfig sharedConfig;
     private final DefaultSftpClient shared;
     private final PoolSettings tenantPool;
     private final SftpSessionContext context;
     private final TenantResolver resolver;
-    private final SftpTenantProvider definitions;
     private final BiFunction<String, SftpClient, SftpClient> decorator;
 
-    private final ConcurrentMap<String, Tenant> tenants = new ConcurrentHashMap<>();
+    private final TenantRegistry<SftpClient> tenants;
     private final ConcurrentMap<String, TenantHandle> handles = new ConcurrentHashMap<>();
-
-    private final long sweepIntervalNanos;
-    private final AtomicLong lastSweep = new AtomicLong(System.nanoTime());
-    private volatile boolean closed;
 
     DefaultMultiTenantSftpClient(SftpProvider provider, SftpConnectionConfig sharedConfig,
             PoolSettings sharedPool, PoolSettings tenantPool, SftpSessionContext context,
             TenantResolver resolver, SftpTenantProvider definitions,
             BiFunction<String, SftpClient, SftpClient> decorator) {
         this.provider = provider;
-        this.sharedConfig = sharedConfig;
         this.shared = sharedConfig == null ? null : new DefaultSftpClient(provider,
                 BoundedSftpSessionPool.blocking(provider, sharedConfig, sharedPool.maxSize(),
                         sharedPool.maxIdle(), sharedPool.acquireTimeout()), context);
         this.tenantPool = tenantPool;
         this.context = context;
         this.resolver = resolver;
-        this.definitions = definitions;
         this.decorator = decorator;
-        // Often enough that a quiet tenant's parked sessions outlive maxIdle by at most half again.
-        this.sweepIntervalNanos = Math.max(tenantPool.maxIdle().toNanos() / 2, 1);
+        this.tenants = new TenantRegistry<>(definitions, sharedConfig, tenantPool, this::create);
     }
 
     // --- tenants ---
@@ -93,11 +73,7 @@ final class DefaultMultiTenantSftpClient implements MultiTenantSftpClient {
 
     @Override
     public void evictTenant(String tenantId) {
-        Tenant evicted = tenants.remove(tenantId);
-        if (evicted != null) {
-            log.debug("Evicting SFTP tenant '{}'", tenantId);
-            evicted.close();
-        }
+        tenants.evict(tenantId);
     }
 
     private SftpClient current() {
@@ -108,30 +84,7 @@ final class DefaultMultiTenantSftpClient implements MultiTenantSftpClient {
         return forTenant(tenantId);
     }
 
-    private Tenant tenant(String tenantId) {
-        if (closed) {
-            throw new IllegalStateException("this multi-tenant SFTP client is closed");
-        }
-        sweepIfDue();
-        Tenant existing = tenants.get(tenantId);
-        if (existing != null) {
-            return existing;
-        }
-        Tenant created = create(tenantId);
-        Tenant raced = tenants.putIfAbsent(tenantId, created);
-        if (raced != null) {
-            created.close();
-            return raced;
-        }
-        return created;
-    }
-
-    private Tenant create(String tenantId) {
-        SftpTenant definition = definitions.resolve(tenantId, sharedConfig);
-        if (definition == null) {
-            throw new SftpException("unknown SFTP tenant '" + tenantId
-                    + "': the tenant provider has no definition for it");
-        }
+    private TenantRegistry.Tenant<SftpClient> create(String tenantId, SftpTenant definition) {
         DefaultSftpClient own = null;
         BoundedSftpSessionPool<SftpSession> ownPool = null;
         SftpClient base;
@@ -150,38 +103,7 @@ final class DefaultMultiTenantSftpClient implements MultiTenantSftpClient {
         SftpClient view = definition.rootDirectory()
                 .<SftpClient>map(root -> RootedSftpClient.forTenant(base, RootDirectory.of(root), tenantId))
                 .orElseGet(() -> new TenantSftpClient(base, tenantId));
-        log.debug("Created SFTP tenant '{}': {}", tenantId, definition);
-        return new Tenant(decorator.apply(tenantId, view), own, ownPool);
-    }
-
-    /** Lets quiet tenants' parked sessions go, on the aggregate traffic of all of them. */
-    private void sweepIfDue() {
-        long last = lastSweep.get();
-        long now = System.nanoTime();
-        if (now - last < sweepIntervalNanos || !lastSweep.compareAndSet(last, now)) {
-            return;
-        }
-        // Only tenants' own pools: every confined tenant's traffic is the shared pool's traffic, and
-        // that already evicts as it goes.
-        for (Tenant tenant : tenants.values()) {
-            if (tenant.ownPool() != null) {
-                tenant.ownPool().evictExpired();
-            }
-        }
-    }
-
-    private record Tenant(SftpClient view, DefaultSftpClient own,
-            BoundedSftpSessionPool<SftpSession> ownPool) {
-
-        void close() {
-            if (own != null) {
-                own.close();
-            }
-        }
-
-        boolean evictable() {
-            return own != null;
-        }
+        return new TenantRegistry.Tenant<>(decorator.apply(tenantId, view), own, ownPool);
     }
 
     // --- the current tenant's operations ---
@@ -309,10 +231,7 @@ final class DefaultMultiTenantSftpClient implements MultiTenantSftpClient {
 
     @Override
     public void close() {
-        closed = true;
-        for (String tenantId : List.copyOf(tenants.keySet())) {
-            evictTenant(tenantId);
-        }
+        tenants.close();
         if (shared != null) {
             shared.close();
         }
@@ -335,12 +254,12 @@ final class DefaultMultiTenantSftpClient implements MultiTenantSftpClient {
         }
 
         private <R> R call(Function<SftpClient, R> operation) {
-            Tenant tenant = tenant(tenantId);
+            TenantRegistry.Tenant<SftpClient> tenant = tenants.get(tenantId);
             try {
-                return operation.apply(tenant.view());
+                return operation.apply(tenant.client);
             } catch (IllegalStateException e) {
-                if (tenant.evictable() && tenants.get(tenantId) != tenant && !closed) {
-                    return operation.apply(tenant(tenantId).view());
+                if (tenants.wasEvicted(tenantId, tenant)) {
+                    return operation.apply(tenants.get(tenantId).client);
                 }
                 throw e;
             }
@@ -355,17 +274,17 @@ final class DefaultMultiTenantSftpClient implements MultiTenantSftpClient {
 
         @Override
         public SftpClientSession openSession() {
-            return tenant(tenantId).view().openSession();
+            return tenants.get(tenantId).client.openSession();
         }
 
         @Override
         public <R> R withSession(Function<SftpOperations, R> work) {
-            return tenant(tenantId).view().withSession(work);
+            return tenants.get(tenantId).client.withSession(work);
         }
 
         @Override
         public void withSessionWithoutResult(Consumer<SftpOperations> work) {
-            tenant(tenantId).view().withSessionWithoutResult(work);
+            tenants.get(tenantId).client.withSessionWithoutResult(work);
         }
 
         @Override

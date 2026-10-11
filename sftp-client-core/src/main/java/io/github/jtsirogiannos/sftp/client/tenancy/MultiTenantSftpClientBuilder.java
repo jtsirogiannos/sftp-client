@@ -1,6 +1,8 @@
 package io.github.jtsirogiannos.sftp.client.tenancy;
 
+import io.github.jtsirogiannos.sftp.client.api.MultiTenantReactiveSftpClient;
 import io.github.jtsirogiannos.sftp.client.api.MultiTenantSftpClient;
+import io.github.jtsirogiannos.sftp.client.api.ReactiveSftpClient;
 import io.github.jtsirogiannos.sftp.client.api.SftpClient;
 import io.github.jtsirogiannos.sftp.client.api.SftpConnectionConfig;
 import io.github.jtsirogiannos.sftp.client.api.TenantResolver;
@@ -10,6 +12,7 @@ import io.github.jtsirogiannos.sftp.client.pool.PoolSettings;
 import io.github.jtsirogiannos.sftp.client.spi.SftpProvider;
 
 import java.util.Objects;
+import java.util.concurrent.Executor;
 import java.util.function.BiFunction;
 
 /**
@@ -42,6 +45,8 @@ public final class MultiTenantSftpClientBuilder {
     private PoolSettings tenantPool = DEFAULT_TENANT_POOL;
     private SftpSessionContext sessionContext = ThreadLocalSftpSessionContext.instance();
     private BiFunction<String, SftpClient, SftpClient> decorator = (tenantId, client) -> client;
+    private BiFunction<String, ReactiveSftpClient, ReactiveSftpClient> reactiveDecorator =
+            (tenantId, client) -> client;
 
     private MultiTenantSftpClientBuilder(SftpProvider provider, SftpConnectionConfig sharedConfig) {
         this.provider = Objects.requireNonNull(provider, "provider");
@@ -108,12 +113,36 @@ public final class MultiTenantSftpClientBuilder {
         return this;
     }
 
+    /** {@link #decorate}, for the tenants of a client built with {@link #buildReactive}. */
+    public MultiTenantSftpClientBuilder decorateReactive(
+            BiFunction<String, ReactiveSftpClient, ReactiveSftpClient> decorator) {
+        this.reactiveDecorator = Objects.requireNonNull(decorator, "decorator");
+        return this;
+    }
+
     public MultiTenantSftpClient build() {
+        return new DefaultMultiTenantSftpClient(provider, sharedConfig, sharedPool, tenantPool,
+                sessionContext, resolver, requireTenants(), decorator);
+    }
+
+    /**
+     * The reactive multi-tenant client. Every tenant gets thread-free sessions where the provider can
+     * open them, as {@code SftpClients.reactive} would choose.
+     *
+     * @param worker for the parts that block — opening connections, waiting for a slot, and every
+     *               operation of a blocking provider. Not shut down by the client.
+     */
+    public MultiTenantReactiveSftpClient buildReactive(Executor worker) {
+        return new DefaultMultiTenantReactiveSftpClient(provider, sharedConfig, sharedPool, tenantPool,
+                sessionContext, Objects.requireNonNull(worker, "worker"), resolver, requireTenants(),
+                reactiveDecorator);
+    }
+
+    private SftpTenantProvider requireTenants() {
         if (tenants == null) {
             throw new IllegalStateException(
                     "no tenant provider: call tenants(...) to say how each tenant is isolated");
         }
-        return new DefaultMultiTenantSftpClient(provider, sharedConfig, sharedPool, tenantPool,
-                sessionContext, resolver, tenants, decorator);
+        return tenants;
     }
 }
